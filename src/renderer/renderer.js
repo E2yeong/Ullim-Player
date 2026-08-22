@@ -144,6 +144,7 @@
     if (state.currentIndex === -1 && state.tracks.length) {
       loadTrack(0, false);
     }
+    scheduleSave();
   }
 
   function renderPlaylist() {
@@ -195,6 +196,7 @@
       state.currentIndex--;
     }
     renderPlaylist();
+    scheduleSave();
   }
 
   function clearPlaylist() {
@@ -208,6 +210,7 @@
     renderPlaylist();
     setPlayIcon(false);
     broadcastState();
+    scheduleSave();
   }
 
   function updateCoverVisibility(forceCover) {
@@ -240,6 +243,7 @@
       mediaEl.play().catch(() => {});
     }
     broadcastState();
+    scheduleSave();
   }
 
   function setPlayIcon(playing) {
@@ -358,6 +362,7 @@
         mediaEl.volume = cmd.value;
         volumeBar.value = String(Math.round(cmd.value * 100));
         updateRangeFill(volumeBar);
+        scheduleSave();
         break;
     }
   });
@@ -371,6 +376,92 @@
     btnOverlay.classList.toggle('active', isOpen);
     if (isOpen) broadcastState();
   });
+
+  // ---------- Persisted settings ----------
+  let readyToSave = false;
+  let saveTimer = null;
+
+  function gatherSettings() {
+    return {
+      tracks: state.tracks,
+      currentIndex: state.currentIndex,
+      repeatMode: state.repeatMode,
+      shuffle: state.shuffle,
+      eqEnabled: state.eqEnabled,
+      volume: mediaEl.volume,
+      eq: {
+        bass: Number(bassSlider.value),
+        mid: Number(midSlider.value),
+        treble: Number(trebleSlider.value),
+        reverb: Number(reverbSlider.value)
+      }
+    };
+  }
+
+  function scheduleSave() {
+    if (!readyToSave) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      window.api.saveSettings(gatherSettings());
+    }, 400);
+  }
+
+  window.addEventListener('beforeunload', () => {
+    if (!readyToSave) return;
+    clearTimeout(saveTimer);
+    window.api.saveSettings(gatherSettings());
+  });
+
+  async function restoreSettings() {
+    let data = null;
+    try {
+      data = await window.api.loadSettings();
+    } catch {
+      data = null;
+    }
+
+    if (data) {
+      if (data.eq) {
+        bassSlider.value = data.eq.bass ?? 0;
+        midSlider.value = data.eq.mid ?? 0;
+        trebleSlider.value = data.eq.treble ?? 0;
+        reverbSlider.value = data.eq.reverb ?? 0;
+        valBass.textContent = `${bassSlider.value} dB`;
+        valMid.textContent = `${midSlider.value} dB`;
+        valTreble.textContent = `${trebleSlider.value} dB`;
+        valReverb.textContent = `${reverbSlider.value} %`;
+      }
+      if (typeof data.eqEnabled === 'boolean') {
+        state.eqEnabled = data.eqEnabled;
+        btnEqToggle.classList.toggle('on', state.eqEnabled);
+        btnEqToggle.textContent = state.eqEnabled ? 'EQ ON' : 'EQ OFF';
+      }
+      if (data.repeatMode) {
+        state.repeatMode = data.repeatMode;
+        updateRepeatButton();
+      }
+      if (typeof data.shuffle === 'boolean') {
+        state.shuffle = data.shuffle;
+        btnShuffle.classList.toggle('active', state.shuffle);
+      }
+      if (typeof data.volume === 'number') {
+        mediaEl.volume = data.volume;
+        volumeBar.value = String(Math.round(data.volume * 100));
+      }
+      [bassSlider, midSlider, trebleSlider, reverbSlider, volumeBar].forEach(updateRangeFill);
+
+      if (Array.isArray(data.tracks) && data.tracks.length) {
+        state.tracks = data.tracks;
+        renderPlaylist();
+        const idx = typeof data.currentIndex === 'number' ? data.currentIndex : -1;
+        if (idx >= 0 && idx < state.tracks.length) {
+          loadTrack(idx, false);
+        }
+      }
+    }
+
+    readyToSave = true;
+  }
 
   // ---------- Auto update ----------
   let updateState = 'idle'; // idle | checking | available | downloading | downloaded
@@ -455,11 +546,13 @@
   btnRepeat.addEventListener('click', () => {
     state.repeatMode = state.repeatMode === 'off' ? 'all' : state.repeatMode === 'all' ? 'one' : 'off';
     updateRepeatButton();
+    scheduleSave();
   });
 
   btnShuffle.addEventListener('click', () => {
     state.shuffle = !state.shuffle;
     btnShuffle.classList.toggle('active', state.shuffle);
+    scheduleSave();
   });
 
   btnEqToggle.addEventListener('click', () => {
@@ -467,6 +560,7 @@
     btnEqToggle.classList.toggle('on', state.eqEnabled);
     btnEqToggle.textContent = state.eqEnabled ? 'EQ ON' : 'EQ OFF';
     applyEqValues();
+    scheduleSave();
   });
 
   mediaEl.addEventListener('play', () => { setPlayIcon(true); broadcastState(); });
@@ -503,6 +597,7 @@
     mediaEl.volume = Number(volumeBar.value) / 100;
     updateRangeFill(volumeBar);
     broadcastState();
+    scheduleSave();
   });
 
   function wireEqSlider(slider, label, unit, fmt) {
@@ -510,6 +605,7 @@
       label.textContent = fmt ? fmt(slider.value) : `${slider.value}${unit}`;
       updateRangeFill(slider);
       applyEqValues();
+      scheduleSave();
     });
   }
   wireEqSlider(bassSlider, valBass, ' dB');
@@ -537,6 +633,7 @@
       valTreble.textContent = p.treble + ' dB';
       valReverb.textContent = p.reverb + ' %';
       applyEqValues();
+      scheduleSave();
     });
   });
 
@@ -570,4 +667,5 @@
   [seekBar, volumeBar, bassSlider, midSlider, trebleSlider, reverbSlider].forEach(updateRangeFill);
   updateRepeatButton();
   updateCoverVisibility(true);
+  restoreSettings();
 })();

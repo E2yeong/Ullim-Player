@@ -1,6 +1,6 @@
 {
   "name": "music-player-pro",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "로컬 mp3/mp4 음악 재생 프로그램 (플레이리스트, 반복재생, EQ)",
   "main": "src/main.js",
   "scripts": {

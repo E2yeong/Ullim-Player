@@ -11,5 +11,8 @@ contextBridge.exposeInMainWorld('api', {
   checkForUpdate: () => ipcRenderer.invoke('check-for-update'),
   downloadUpdate: () => ipcRenderer.invoke('download-update'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
-  onUpdateStatus: (callback) => ipcRenderer.on('update-status', (_event, payload) => callback(payload))
+  onUpdateStatus: (callback) => ipcRenderer.on('update-status', (_event, payload) => callback(payload)),
+
+  loadSettings: () => ipcRenderer.invoke('load-settings'),
+  saveSettings: (data) => ipcRenderer.send('save-settings', data)
 });

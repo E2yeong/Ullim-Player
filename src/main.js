@@ -196,3 +196,33 @@ ipcMain.handle('download-update', async () => {
 ipcMain.handle('install-update', () => {
   autoUpdater.quitAndInstall();
 });
+
+// ---------- Persisted player settings ----------
+function getSettingsPath() {
+  return path.join(app.getPath('userData'), 'player-settings.json');
+}
+
+ipcMain.handle('load-settings', () => {
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(getSettingsPath(), 'utf8'));
+  } catch {
+    return null;
+  }
+  if (Array.isArray(data.tracks)) {
+    const original = data.tracks;
+    const currentPath = original[data.currentIndex] ? original[data.currentIndex].path : null;
+    const validTracks = original.filter((t) => t && typeof t.path === 'string' && fs.existsSync(t.path));
+    data.tracks = validTracks;
+    data.currentIndex = currentPath ? validTracks.findIndex((t) => t.path === currentPath) : -1;
+  }
+  return data;
+});
+
+ipcMain.on('save-settings', (_event, data) => {
+  try {
+    fs.writeFileSync(getSettingsPath(), JSON.stringify(data));
+  } catch {
+    // ignore write failures (e.g. disk full)
+  }
+});
