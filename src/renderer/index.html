@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' file: data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline';" />
+<title>Music Player Pro</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app" class="app">
+
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>재생목록</h1>
+      <div class="sidebar-actions">
+        <button id="btnAddFiles" class="icon-btn" title="파일 추가">＋ 추가</button>
+        <button id="btnClearList" class="icon-btn ghost" title="전체 삭제">전체 삭제</button>
+      </div>
+    </div>
+    <ul id="playlist" class="playlist"></ul>
+    <div id="dropHint" class="drop-hint">여기에 mp3 / mp4 파일을 끌어다 놓으세요</div>
+
+    <div class="update-box">
+      <div class="update-row">
+        <span id="appVersion" class="app-version">v-</span>
+        <button id="btnCheckUpdate" class="icon-btn ghost small">업데이트 확인</button>
+      </div>
+      <div id="updateStatus" class="update-status"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="stage">
+      <div class="video-wrap" id="videoWrap">
+        <video id="mediaEl" playsinline></video>
+        <div id="coverArt" class="cover-art">
+          <div class="cover-note">♪</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="now-playing">
+      <div class="track-title" id="trackTitle">재생할 파일을 선택하세요</div>
+      <div class="track-sub" id="trackSub">&nbsp;</div>
+    </div>
+
+    <div class="seek-row">
+      <span id="curTime" class="time">0:00</span>
+      <input type="range" id="seekBar" min="0" max="1000" value="0" step="1" />
+      <span id="durTime" class="time">0:00</span>
+    </div>
+
+    <div class="controls-row">
+      <button id="btnShuffle" class="ctrl-btn" title="셔플">🔀</button>
+      <button id="btnPrev" class="ctrl-btn" title="이전 곡">⏮</button>
+      <button id="btnPlay" class="ctrl-btn play" title="재생/일시정지">▶</button>
+      <button id="btnNext" class="ctrl-btn" title="다음 곡">⏭</button>
+      <button id="btnRepeat" class="ctrl-btn" title="반복 모드">🔁</button>
+      <button id="btnOverlay" class="ctrl-btn" title="오버레이 모드 (항상 위에 떠 있는 미니 플레이어)">📌</button>
+
+      <div class="volume-box">
+        <span>🔊</span>
+        <input type="range" id="volumeBar" min="0" max="100" value="80" />
+      </div>
+    </div>
+
+    <section class="eq-panel">
+      <div class="eq-header">
+        <h2>이퀄라이저</h2>
+        <button id="btnEqToggle" class="icon-btn ghost" title="EQ 켜기/끄기">EQ ON</button>
+      </div>
+      <div class="eq-grid">
+        <div class="eq-slider">
+          <label>Bass<span id="valBass">0 dB</span></label>
+          <input type="range" id="bassSlider" min="-15" max="15" step="1" value="0" />
+        </div>
+        <div class="eq-slider">
+          <label>Mid<span id="valMid">0 dB</span></label>
+          <input type="range" id="midSlider" min="-15" max="15" step="1" value="0" />
+        </div>
+        <div class="eq-slider">
+          <label>Treble<span id="valTreble">0 dB</span></label>
+          <input type="range" id="trebleSlider" min="-15" max="15" step="1" value="0" />
+        </div>
+        <div class="eq-slider">
+          <label>Reverb<span id="valReverb">0 %</span></label>
+          <input type="range" id="reverbSlider" min="0" max="100" step="1" value="0" />
+        </div>
+      </div>
+      <div class="eq-presets">
+        <button class="preset-btn" data-preset="flat">Flat</button>
+        <button class="preset-btn" data-preset="bassBoost">Bass Boost</button>
+        <button class="preset-btn" data-preset="vocal">Vocal</button>
+        <button class="preset-btn" data-preset="hall">Hall Reverb</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="renderer.js"></script>
+</body>
+</html>

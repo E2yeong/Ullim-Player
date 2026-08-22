@@ -1,0 +1,49 @@
+{
+  "name": "music-player-pro",
+  "version": "1.0.0",
+  "description": "로컬 mp3/mp4 음악 재생 프로그램 (플레이리스트, 반복재생, EQ)",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "publish": "electron-builder --publish always"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.3.1",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "build": {
+    "appId": "com.local.musicplayerpro",
+    "productName": "Music Player Pro",
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "update-token.txt",
+        "to": "update-token.txt"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "E2yeong",
+        "repo": "music-player-pro",
+        "private": true
+      }
+    ]
+  }
+}

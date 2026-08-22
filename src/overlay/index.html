@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';" />
+<title>overlay</title>
+<link rel="stylesheet" href="overlay.css" />
+</head>
+<body>
+<div class="panel">
+  <div class="drag-bar">
+    <span class="dot"></span>
+    <div class="title" id="title">재생 중인 곡 없음</div>
+    <button id="btnClose" class="close-btn" title="오버레이 닫기">✕</button>
+  </div>
+
+  <div class="row">
+    <button id="btnPrev" class="ov-btn" title="이전 곡">⏮</button>
+    <button id="btnPlay" class="ov-btn play" title="재생/일시정지">▶</button>
+    <button id="btnNext" class="ov-btn" title="다음 곡">⏭</button>
+    <div class="volume">
+      <span class="vicon">🔊</span>
+      <input type="range" id="volume" min="0" max="100" value="80" />
+    </div>
+  </div>
+</div>
+<script src="overlay.js"></script>
+</body>
+</html>
