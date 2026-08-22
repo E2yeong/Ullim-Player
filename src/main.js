@@ -101,7 +101,13 @@ function setupAutoUpdater() {
 
   const token = getUpdateToken();
   if (token) {
-    autoUpdater.requestHeaders = { Authorization: `token ${token}` };
+    autoUpdater.setFeedURL({
+      provider: 'github',
+      owner: 'E2yeong',
+      repo: 'music-player-pro',
+      private: true,
+      token
+    });
   }
 
   autoUpdater.on('checking-for-update', () => sendUpdateStatus({ status: 'checking' }));
