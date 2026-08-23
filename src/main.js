@@ -37,7 +37,7 @@ function createWindow() {
     minHeight: 560,
     backgroundColor: '#14141a',
     autoHideMenuBar: true,
-    icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -68,7 +68,7 @@ function createWindow() {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'tray-icon.png'));
+  const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'icon.ico'));
   tray = new Tray(icon);
   tray.setToolTip('Music Player Pro');
 

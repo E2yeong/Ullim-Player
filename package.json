@@ -1,6 +1,6 @@
 {
   "name": "music-player-pro",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "로컬 mp3/mp4 음악 재생 프로그램 (플레이리스트, 반복재생, EQ)",
   "main": "src/main.js",
   "scripts": {
@@ -22,7 +22,8 @@
     "productName": "Music Player Pro",
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "icon": "build/icon.ico"
     },
     "files": [
       "src/**/*",

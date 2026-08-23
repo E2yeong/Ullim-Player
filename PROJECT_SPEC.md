@@ -26,9 +26,7 @@ Music_pro/
   package.json          # electron-builder 설정(build 필드) 포함
   update-token.txt       # (git에 없음) private repo 읽기 전용 fine-grained PAT, 로컬에만 존재
   build/
-    icon.png             # 앱 아이콘 원본 (electron-builder가 자동으로 .ico 등 변환)
-    tray-icon.png         # 트레이 아이콘 (작게, 32x32)
-    tray-icon@2x.png
+    icon.ico              # 앱 아이콘 (창/트레이/설치파일 아이콘 전부 이 파일 하나로 사용)
   src/
     main.js               # Electron 메인 프로세스 (창 생성, IPC, 트레이, 자동 업데이트, 설정 파일 I/O)
     preload.js             # 메인 창용 contextBridge API (window.api)
@@ -168,6 +166,29 @@ gh release create vX.X.X --repo <owner>/<repo> --draft \
 # 그 다음 GitHub 웹에서 draft를 "Publish release"로 공개해야 electron-updater가 찾아냄 (draft는 안 보임)
 ```
 
+**주의 — `signAndEditExecutable: false`와 아이콘**: 이 PC의 Windows 보안 정책 때문에
+`package.json`의 `build.win.signAndEditExecutable`을 `false`로 꺼뒀는데(§7 참고), 이 옵션은
+**exe에 아이콘을 심는 rcedit 단계까지 같이 꺼버린다**. 그래서 `npm run dist`만 실행하면 `build.win.icon`을
+지정해도 실제 exe에는 기본 Electron 아이콘이 박힌다. 아이콘을 실제로 반영하려면 빌드 후 수동으로
+rcedit를 한 번 더 돌려야 한다:
+
+```bash
+# 1. 평소처럼 빌드 (아이콘은 아직 안 박힌 상태)
+npm run dist
+
+# 2. rcedit로 언팩된 exe에 아이콘 수동 삽입
+#    rcedit 바이너리는 winCodeSign 캐시 폴더 아무 데나 있음 (부분 다운로드라도 rcedit 자체는 받아짐):
+#    C:\Users\<user>\AppData\Local\electron-builder\Cache\winCodeSign\<hash>\rcedit-x64.exe
+"<rcedit-x64.exe 경로>" "dist\win-unpacked\Music Player Pro.exe" --set-icon "build\icon.ico"
+
+# 3. 아이콘이 박힌 win-unpacked를 그대로 다시 NSIS로 포장 (재패키징 없이)
+npx electron-builder --prepackaged "dist\win-unpacked" --win nsis
+```
+`--prepackaged`는 electron-builder가 처음부터 다시 패키징하지 않고, 이미 있는 `win-unpacked` 폴더를
+그대로 설치파일로 감싸기만 하므로 방금 rcedit로 심은 아이콘이 유지된다. NSIS 설치파일(`Setup.exe`)
+자체의 아이콘은 `signAndEditExecutable`과 무관하게 `build.win.icon` 설정만으로 정상 반영된다 —
+문제는 오직 앱 내부의 실행 파일(`Music Player Pro.exe`)에만 있다.
+
 ## 7. 이 PC에서 겪었던 환경 이슈 (재현 시 참고)
 
 - **Windows 애플리케이션 제어 정책**: 이 PC는 서명되지 않은 새 실행파일 실행을 막는 보안 정책이 걸려
@@ -188,3 +209,5 @@ gh release create vX.X.X --repo <owner>/<repo> --draft \
 - 미디어 키(키보드/이어폰 재생 버튼) 지원 — Electron `globalShortcut` 또는 `MediaSession` API
 - Windows 작업표시줄 썸네일 툴바 버튼 (`BrowserWindow.setThumbarButtons`)
 - 리버브 wet 게인을 % 옆에 dB로도 보조 표시 (사용자 의견 교환만 하고 미적용 상태)
+- `build/icon.ico`는 현재 32×32 한 사이즈만 포함되어 있음 — 외주로 아이콘을 새로 받을 땐
+  16/32/48/256px을 전부 포함한 멀티 레졸루션 ico로 요청할 것 (큰 사이즈에서 흐려지는 것 방지)
