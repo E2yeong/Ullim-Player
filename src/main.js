@@ -87,7 +87,10 @@ function createWindow(startHidden) {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'icon.ico'));
+  const iconPath = path.join(__dirname, '..', 'build', 'icon.ico');
+  // the .ico has multiple sizes up to 256x256; nativeImage picks the largest by
+  // default, which Windows fails to render properly in the notification area.
+  const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
   tray = new Tray(icon);
   tray.setToolTip('Ullim');
 
@@ -188,7 +191,7 @@ function createSplashWindow(onDone) {
 const OVERLAY_MIN_WIDTH = 260;
 const OVERLAY_MIN_HEIGHT = 110;
 const OVERLAY_MAX_WIDTH = 640;
-const OVERLAY_MAX_HEIGHT = 320;
+const OVERLAY_MAX_HEIGHT = 420;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -382,6 +385,13 @@ ipcMain.on('overlay-close', () => {
 ipcMain.on('player-state-update', (_event, state) => {
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     overlayWindow.webContents.send('state-update', state);
+  }
+});
+
+// Main renderer -> overlay (lightweight audio level for the pulsing dot)
+ipcMain.on('player-level-update', (_event, level) => {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send('level-update', level);
   }
 });
 

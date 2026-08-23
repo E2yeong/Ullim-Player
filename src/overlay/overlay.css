@@ -45,6 +45,8 @@ html, body {
   border-radius: 50%;
   background: #6c5ce7;
   flex-shrink: 0;
+  transform: scale(1);
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out;
 }
 
 .title {
@@ -134,4 +136,72 @@ input[type="range"]::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 3px;
   background: linear-gradient(90deg, #6c5ce7 var(--fill, 80%), #2c2c3a 0);
+}
+
+.eq-mini {
+  -webkit-app-region: no-drag;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.panel.expanded .eq-mini { display: flex; }
+
+.eq-mini-bands {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  flex: 1;
+  min-height: 40px;
+}
+.eq-mini-band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.eq-mini-band .eq-mini-freq {
+  font-size: 8.5px;
+  color: #7c7e92;
+}
+.eq-mini-band input[type="range"] {
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+  width: 5px;
+  flex: 1;
+  min-height: 24px;
+  background: #2c2c3a;
+  border-radius: 3px;
+  padding: 0;
+}
+.eq-mini-band input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px; height: 8px;
+  border-radius: 2px;
+  background: #6c5ce7;
+  cursor: pointer;
+}
+.eq-mini-band input[type="range"]::-webkit-slider-runnable-track {
+  width: 5px;
+  background: #2c2c3a;
+  border-radius: 3px;
+}
+
+.eq-mini-reverb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.eq-mini-reverb .ptime {
+  width: auto;
+  flex-shrink: 0;
+}
+.eq-mini-reverb input[type="range"] {
+  flex: 1;
 }

@@ -1,7 +1,9 @@
 (() => {
   'use strict';
 
+  const panelEl = document.querySelector('.panel');
   const titleEl = document.getElementById('title');
+  const dotEl = document.querySelector('.dot');
   const btnPlay = document.getElementById('btnPlay');
   const btnPrev = document.getElementById('btnPrev');
   const btnNext = document.getElementById('btnNext');
@@ -10,6 +12,46 @@
   const seekBar = document.getElementById('seekBar');
   const curTimeEl = document.getElementById('curTime');
   const durTimeEl = document.getElementById('durTime');
+  const eqMiniBandsEl = document.getElementById('eqMiniBands');
+  const miniReverb = document.getElementById('miniReverb');
+
+  // must match src/renderer/renderer.js EQ_BANDS
+  const EQ_BAND_LABELS = ['60', '150', '400', '1K', '2.5K', '6K', '12K', '16K'];
+  const EQ_MIN = -36;
+  const EQ_MAX = 36;
+
+  let volumeDragging = false;
+  let seekDragging = false;
+  let eqDragging = false;
+  let lastDuration = 0;
+
+  const miniSliders = [];
+  EQ_BAND_LABELS.forEach((label, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'eq-mini-band';
+
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(EQ_MIN);
+    input.max = String(EQ_MAX);
+    input.step = '1';
+    input.value = '0';
+
+    const freq = document.createElement('span');
+    freq.className = 'eq-mini-freq';
+    freq.textContent = label;
+
+    wrap.appendChild(input);
+    wrap.appendChild(freq);
+    eqMiniBandsEl.appendChild(wrap);
+    miniSliders.push(input);
+
+    input.addEventListener('mousedown', () => { eqDragging = true; });
+    input.addEventListener('mouseup', () => { eqDragging = false; });
+    input.addEventListener('input', () => {
+      window.overlayApi.sendCommand({ type: 'eq-band', index: i, value: Number(input.value) });
+    });
+  });
 
   function updateRangeFill(input) {
     const min = Number(input.min) || 0;
@@ -24,10 +66,6 @@
     const s = Math.floor(sec % 60);
     return `${m}:${String(s).padStart(2, '0')}`;
   }
-
-  let volumeDragging = false;
-  let seekDragging = false;
-  let lastDuration = 0;
 
   window.overlayApi.onState((state) => {
     titleEl.textContent = state.title
@@ -49,6 +87,23 @@
         updateRangeFill(seekBar);
       }
     }
+    if (!eqDragging && state.eq) {
+      if (Array.isArray(state.eq.bands)) {
+        miniSliders.forEach((s, i) => {
+          if (state.eq.bands[i] != null) s.value = state.eq.bands[i];
+        });
+      }
+      if (typeof state.eq.reverb === 'number') {
+        miniReverb.value = String(state.eq.reverb);
+        updateRangeFill(miniReverb);
+      }
+    }
+  });
+
+  window.overlayApi.onLevel((level) => {
+    const scale = 1 + Math.min(1, level) * 1.6;
+    dotEl.style.transform = `scale(${scale})`;
+    dotEl.style.boxShadow = `0 0 ${4 + level * 10}px rgba(108, 92, 231, ${0.4 + level * 0.5})`;
   });
 
   btnPlay.addEventListener('click', () => window.overlayApi.sendCommand({ type: 'toggle-play' }));
@@ -75,6 +130,22 @@
     seekDragging = false;
   });
 
+  miniReverb.addEventListener('mousedown', () => { eqDragging = true; });
+  miniReverb.addEventListener('mouseup', () => { eqDragging = false; });
+  miniReverb.addEventListener('input', () => {
+    updateRangeFill(miniReverb);
+    window.overlayApi.sendCommand({ type: 'eq-reverb', value: Number(miniReverb.value) });
+  });
+
+  // reveal the mini EQ panel once the user resizes the window tall enough for it
+  const EXPAND_THRESHOLD = 260;
+  function updateExpanded() {
+    panelEl.classList.toggle('expanded', window.innerHeight >= EXPAND_THRESHOLD);
+  }
+  window.addEventListener('resize', updateExpanded);
+  updateExpanded();
+
   updateRangeFill(volume);
   updateRangeFill(seekBar);
+  updateRangeFill(miniReverb);
 })();

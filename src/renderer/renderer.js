@@ -91,7 +91,8 @@
   let audioCtx = null;
   let sourceNode = null;
   let eqFilters = [];
-  let dryGain, wetGain, convolver, masterGain, limiter;
+  let dryGain, wetGain, convolver, masterGain, limiter, analyser;
+  let analyserData = null;
 
   function buildImpulseResponse(ctx, seconds, decay) {
     const rate = ctx.sampleRate;
@@ -156,6 +157,12 @@
     masterGain.connect(limiter);
     limiter.connect(audioCtx.destination);
 
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
+    analyserData = new Uint8Array(analyser.frequencyBinCount);
+    masterGain.connect(analyser); // tap for visualization only, not in the audible path
+
     applyEqValues();
   }
 
@@ -169,6 +176,110 @@
     wetGain.gain.value = wet;
     dryGain.gain.value = 0.92; // small constant headroom so wet doesn't clip; independent of reverb amount
   }
+
+  // ---------- Ripple visualizer ----------
+  const rippleCanvas = document.getElementById('rippleCanvas');
+  const rippleCtx = rippleCanvas.getContext('2d');
+  const coverNoteEl = document.querySelector('.cover-note');
+  let ripples = [];
+  let rippleRafId = null;
+  let lastRippleTime = 0;
+  let bassHistory = [];
+  let lastLevelBroadcast = 0;
+
+  function resizeRippleCanvas() {
+    const rect = coverArt.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    rippleCanvas.width = Math.max(1, Math.round(rect.width * dpr));
+    rippleCanvas.height = Math.max(1, Math.round(rect.height * dpr));
+    rippleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function getBassLevel() {
+    if (!analyser || !analyserData) return 0;
+    analyser.getByteFrequencyData(analyserData);
+    const bins = Math.min(8, analyserData.length);
+    let sum = 0;
+    for (let i = 0; i < bins; i++) sum += analyserData[i];
+    return sum / bins / 255;
+  }
+
+  function getOverallLevel() {
+    if (!analyser || !analyserData) return 0;
+    let sum = 0;
+    for (let i = 0; i < analyserData.length; i++) sum += analyserData[i];
+    return sum / analyserData.length / 255;
+  }
+
+  function broadcastLevel(level) {
+    if (!window.api.sendPlayerLevel) return;
+    const now = performance.now();
+    if (now - lastLevelBroadcast < 100) return;
+    lastLevelBroadcast = now;
+    window.api.sendPlayerLevel(level);
+  }
+
+  function rippleTick(now) {
+    rippleRafId = requestAnimationFrame(rippleTick);
+
+    const overall = getOverallLevel();
+    broadcastLevel(overall);
+
+    if (coverArt.classList.contains('hidden')) return;
+
+    const rect = coverArt.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    if (w === 0 || h === 0) return;
+
+    const bass = getBassLevel();
+    bassHistory.push(bass);
+    if (bassHistory.length > 30) bassHistory.shift();
+    const avgBass = bassHistory.reduce((a, b) => a + b, 0) / bassHistory.length;
+
+    if (bass > avgBass * 1.35 + 0.06 && now - lastRippleTime > 180) {
+      lastRippleTime = now;
+      ripples.push({ radius: 20, alpha: 0.55 + bass * 0.4 });
+    }
+
+    rippleCtx.clearRect(0, 0, w, h);
+    const cx = w / 2, cy = h / 2;
+    ripples = ripples.filter((r) => r.alpha > 0.01 && r.radius < Math.max(w, h) * 0.75);
+    for (const r of ripples) {
+      r.radius += 1.6;
+      r.alpha *= 0.965;
+      rippleCtx.beginPath();
+      rippleCtx.arc(cx, cy, r.radius, 0, Math.PI * 2);
+      rippleCtx.strokeStyle = `rgba(108, 92, 231, ${r.alpha})`;
+      rippleCtx.lineWidth = 2;
+      rippleCtx.stroke();
+    }
+
+    if (coverNoteEl) {
+      coverNoteEl.style.transform = `scale(${1 + overall * 0.18})`;
+    }
+  }
+
+  function startRippleLoop() {
+    if (rippleRafId) return;
+    lastRippleTime = 0;
+    bassHistory = [];
+    resizeRippleCanvas();
+    rippleRafId = requestAnimationFrame(rippleTick);
+  }
+
+  function stopRippleLoop() {
+    if (rippleRafId) {
+      cancelAnimationFrame(rippleRafId);
+      rippleRafId = null;
+    }
+    ripples = [];
+    if (rippleCtx) rippleCtx.clearRect(0, 0, rippleCanvas.width, rippleCanvas.height);
+    if (coverNoteEl) coverNoteEl.style.transform = 'scale(1)';
+  }
+
+  window.addEventListener('resize', () => {
+    if (!coverArt.classList.contains('hidden')) resizeRippleCanvas();
+  });
 
   // ---------- Playlist helpers ----------
   function extOf(p) {
@@ -266,6 +377,7 @@
     const isVideo = VIDEO_EXT.has(ext) && mediaEl.videoWidth > 0;
     if (forceCover || !isVideo) {
       coverArt.classList.remove('hidden');
+      resizeRippleCanvas();
     } else {
       coverArt.classList.add('hidden');
     }
@@ -393,7 +505,11 @@
       total: state.tracks.length,
       volume: mediaEl.volume,
       currentTime: mediaEl.currentTime || 0,
-      duration: mediaEl.duration || 0
+      duration: mediaEl.duration || 0,
+      eq: {
+        bands: eqSliderEls.map((s) => Number(s.value)),
+        reverb: Number(reverbSlider.value)
+      }
     });
   }
 
@@ -418,6 +534,21 @@
         if (mediaEl.duration) {
           mediaEl.currentTime = cmd.fraction * mediaEl.duration;
         }
+        break;
+      case 'eq-band':
+        if (eqSliderEls[cmd.index]) {
+          eqSliderEls[cmd.index].value = cmd.value;
+          eqValEls[cmd.index].textContent = cmd.value;
+          applyEqValues();
+          scheduleSave();
+        }
+        break;
+      case 'eq-reverb':
+        reverbSlider.value = cmd.value;
+        updateRangeFill(reverbSlider);
+        valReverb.textContent = cmd.value + ' %';
+        applyEqValues();
+        scheduleSave();
         break;
     }
   });
@@ -616,8 +747,8 @@
     scheduleSave();
   });
 
-  mediaEl.addEventListener('play', () => { setPlayIcon(true); broadcastState(); });
-  mediaEl.addEventListener('pause', () => { setPlayIcon(false); broadcastState(); });
+  mediaEl.addEventListener('play', () => { setPlayIcon(true); broadcastState(); startRippleLoop(); });
+  mediaEl.addEventListener('pause', () => { setPlayIcon(false); broadcastState(); stopRippleLoop(); });
   mediaEl.addEventListener('ended', () => playNext(true));
 
   mediaEl.addEventListener('loadedmetadata', () => {
@@ -664,6 +795,7 @@
       eqValEls[i].textContent = slider.value;
       applyEqValues();
       scheduleSave();
+      broadcastState();
     });
   });
 
@@ -673,6 +805,7 @@
       updateRangeFill(slider);
       applyEqValues();
       scheduleSave();
+      broadcastState();
     });
   }
   wireEqSlider(reverbSlider, valReverb, ' %');
@@ -698,6 +831,7 @@
       valReverb.textContent = p.reverb + ' %';
       applyEqValues();
       scheduleSave();
+      broadcastState();
     });
   });
 
