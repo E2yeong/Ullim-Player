@@ -1,10 +1,11 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, screen, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
 let overlayWindow = null;
+let tray = null;
 
 // ---------- Persisted player settings (merge-safe: renderer and main both write partial updates) ----------
 function getSettingsPath() {
@@ -36,6 +37,7 @@ function createWindow() {
     minHeight: 560,
     backgroundColor: '#14141a',
     autoHideMenuBar: true,
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -47,12 +49,67 @@ function createWindow() {
   Menu.setApplicationMenu(null);
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  // Closing the window minimizes to the tray instead of quitting, so playback
+  // (and the overlay) can keep running in the background.
+  mainWindow.on('close', (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
+  });
+
   mainWindow.on('closed', () => {
     if (overlayWindow) {
       overlayWindow.close();
       overlayWindow = null;
     }
     mainWindow = null;
+  });
+}
+
+function createTray() {
+  const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'tray-icon.png'));
+  tray = new Tray(icon);
+  tray.setToolTip('Music Player Pro');
+
+  const sendRemote = (cmd) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('remote-command', cmd);
+    }
+  };
+
+  const menu = Menu.buildFromTemplate([
+    {
+      label: '열기',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    },
+    { type: 'separator' },
+    { label: '재생 / 일시정지', click: () => sendRemote({ type: 'toggle-play' }) },
+    { label: '다음 곡', click: () => sendRemote({ type: 'next' }) },
+    { label: '이전 곡', click: () => sendRemote({ type: 'prev' }) },
+    { type: 'separator' },
+    {
+      label: '종료',
+      click: () => {
+        app.isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+  tray.setContextMenu(menu);
+
+  tray.on('click', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isVisible()) {
+      mainWindow.focus();
+    } else {
+      mainWindow.show();
+    }
   });
 }
 
@@ -190,11 +247,17 @@ function setupAutoUpdater() {
 
 app.whenReady().then(() => {
   createWindow();
+  createTray();
   setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else mainWindow.show();
   });
+});
+
+app.on('before-quit', () => {
+  app.isQuitting = true;
 });
 
 app.on('window-all-closed', () => {

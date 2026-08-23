@@ -391,7 +391,9 @@
       playing: !mediaEl.paused && state.currentIndex >= 0,
       index: state.currentIndex,
       total: state.tracks.length,
-      volume: mediaEl.volume
+      volume: mediaEl.volume,
+      currentTime: mediaEl.currentTime || 0,
+      duration: mediaEl.duration || 0
     });
   }
 
@@ -411,6 +413,11 @@
         volumeBar.value = String(Math.round(cmd.value * 100));
         updateRangeFill(volumeBar);
         scheduleSave();
+        break;
+      case 'seek':
+        if (mediaEl.duration) {
+          mediaEl.currentTime = cmd.fraction * mediaEl.duration;
+        }
         break;
     }
   });
@@ -618,6 +625,7 @@
     updateCoverVisibility(false);
   });
 
+  let lastOverlayBroadcast = 0;
   mediaEl.addEventListener('timeupdate', () => {
     if (state.seeking) return;
     curTimeEl.textContent = fmtTime(mediaEl.currentTime);
@@ -625,6 +633,11 @@
       const pct = (mediaEl.currentTime / mediaEl.duration) * 1000;
       seekBar.value = String(pct);
       updateRangeFill(seekBar);
+    }
+    const now = Date.now();
+    if (now - lastOverlayBroadcast > 500) {
+      lastOverlayBroadcast = now;
+      broadcastState();
     }
   });
 
