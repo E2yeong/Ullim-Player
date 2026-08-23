@@ -53,8 +53,8 @@
     { freq: 12000, type: 'peaking', label: '12K' },
     { freq: 16000, type: 'highshelf', label: '16K' }
   ];
-  const EQ_MIN = -24;
-  const EQ_MAX = 24;
+  const EQ_MIN = -36;
+  const EQ_MAX = 36;
 
   const eqSliderEls = [];
   const eqValEls = [];
@@ -133,9 +133,9 @@
 
     // a soft limiter so stacking multiple +24dB band boosts doesn't clip harshly
     limiter = audioCtx.createDynamicsCompressor();
-    limiter.threshold.value = -6;
-    limiter.knee.value = 6;
-    limiter.ratio.value = 12;
+    limiter.threshold.value = -10;
+    limiter.knee.value = 4;
+    limiter.ratio.value = 20; // near-brickwall: EQ boosts now go up to +/-36dB and reverb to 100% wet
     limiter.attack.value = 0.003;
     limiter.release.value = 0.25;
 
@@ -165,7 +165,7 @@
     eqFilters.forEach((filter, i) => {
       filter.gain.value = enabled ? Number(eqSliderEls[i].value) : 0;
     });
-    const wet = enabled ? (Number(reverbSlider.value) / 100) * 0.7 : 0;
+    const wet = enabled ? Number(reverbSlider.value) / 100 : 0;
     wetGain.gain.value = wet;
     dryGain.gain.value = 0.92; // small constant headroom so wet doesn't clip; independent of reverb amount
   }
@@ -667,9 +667,9 @@
   // Band order: 60, 150, 400, 1K, 2.5K, 6K, 12K, 16K
   const EQ_PRESETS = {
     flat: { bands: [0, 0, 0, 0, 0, 0, 0, 0], reverb: 0 },
-    bassBoost: { bands: [16, 10, 3, 0, 0, 0, 0, 0], reverb: 8 },
-    vocal: { bands: [-6, -3, -2, 3, 6, 4, 1, 0], reverb: 10 },
-    hall: { bands: [1, 0, 0, 0, 0, 2, 3, 2], reverb: 65 }
+    bassBoost: { bands: [26, 18, 5, 0, 0, 0, 0, 0], reverb: 10 },
+    vocal: { bands: [-8, -4, -2, 4, 8, 5, 1, 0], reverb: 12 },
+    hall: { bands: [2, 0, 0, 0, 0, 3, 5, 4], reverb: 90 }
   };
 
   document.querySelectorAll('.preset-btn').forEach((btn) => {
