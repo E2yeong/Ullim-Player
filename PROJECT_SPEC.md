@@ -95,8 +95,8 @@ MediaElementSource
 
 ### 4.5 설정 자동 저장/복원
 - 저장 위치: `app.getPath('userData')/player-settings.json` (Windows: `%APPDATA%\<productName 소문자>\`)
-- 저장 항목: `tracks`(경로+이름 배열), `currentIndex`, `repeatMode`, `shuffle`, `eqEnabled`, `volume`,
-  `eq: { bands: number[8], reverb: number }`, `overlayBounds`.
+- 저장 항목: `tracks`(경로+이름 배열), `currentIndex`, `repeatMode`, `shuffle`, `eqEnabled`,
+  `waveformEnabled`, `volume`, `eq: { bands: number[8], reverb: number }`, `overlayBounds`.
 - **읽기-수정-쓰기(read-modify-write) 병합** 방식 (`writeSettingsFile`) — 렌더러가 부분 정보만 저장해도
   메인 프로세스가 직접 저장하는 `overlayBounds` 같은 필드를 덮어쓰지 않도록 항상 기존 파일을 읽어 병합
   후 저장.
@@ -143,15 +143,22 @@ MediaElementSource
    AI 음원 분리(악기별 감지)는 채택하지 않음** — 대신 8밴드로 세분화.
 2. 최종: 8밴드(60/150/400/1K/2.5K/6K/12K/16K), ±36dB, 리버브 최대 100% wet, 리미터로 안전장치.
 
-### 4.9 리플(파동) 비주얼라이저 — 앱 이름("울림")을 시각화한 시그니처 기능
-- `masterGain`에서 `AnalyserNode`(fftSize 256, smoothing 0.8)를 탭으로 분기 연결 (오디오 경로 자체에는
-  영향 없음, 시각화 전용).
-- 커버아트 영역(`#coverArt`, 실제 영상이 아니라 오디오 전용 재생일 때만 보임)에 `<canvas>`를 깔고,
-  매 프레임 저음 대역(첫 8개 bin)의 순간값이 최근 30프레임 평균보다 뚜렷하게(1.35배 + 여유값) 튀면
-  중심에서 퍼지는 원(ripple)을 하나 생성 — 돌 던지면 물결 퍼지는 것과 같은 방식. 전체 레벨(전 bin 평균)에
-  따라 중앙의 ♪ 아이콘도 살짝 커짐.
+### 4.9 파형(waveform) 비주얼라이저 — 앱 이름("울림")을 시각화한 시그니처 기능
+- `masterGain`에서 `AnalyserNode`(fftSize 512, smoothing 0.8)를 탭으로 분기 연결 (오디오 경로 자체에는
+  영향 없음, 시각화 전용). 주파수 데이터(`analyserData`, 전체 레벨용)와 시간 도메인 데이터
+  (`waveformData`, 파형 모양용)를 둘 다 사용.
+- **모양은 원형 리플이 아니라 가로로 펼쳐진 파형** (오디오 편집 프로그램의 웨이브폼과 비슷한 느낌).
+  `getByteTimeDomainData()`를 `WAVE_POINTS`(48)개 구간으로 나눠 각 구간의 최대 진폭을 뽑고, 그 값을
+  "envelope" 배열에 저장 — 새 값이 크면 즉시 튀어오르지만 작으면 `WAVE_DECAY`(0.93)씩만 감쇠시켜서
+  **파형이 순간적으로 사라지지 않고 잔상처럼 오래 남도록** 만듦 (첫 버전은 매 프레임 즉시 사라지는
+  원형 ripple이었는데 "파형이 좀 더 오래갔으면"이라는 피드백을 받고 이 방식으로 바꿈).
+  이 envelope을 위/아래로 미러링해서 부드러운 곡선(`quadraticCurveTo`)으로 잇고 보라색 그라데이션 +
+  glow로 채워서 그림.
+- 커버아트 영역(`#coverArt`, 실제 영상이 아니라 오디오 전용 재생일 때만 보임)에 `<canvas>`로 그려짐 —
+  실제 mp4 영상 위를 덮지 않음. 그래도 "영상 보고 싶을 때도 있다"는 요청으로 `#btnWaveToggle` 버튼을
+  달아 `state.waveformEnabled`로 완전히 껐다 켤 수 있게 함 (설정에 저장됨).
 - `mediaEl`의 `play`/`pause` 이벤트로 `requestAnimationFrame` 루프를 시작/정지 (재생 중이 아닐 때는
-  그리지 않아 CPU 낭비 없음).
+  그리지 않아 CPU 낭비 없음, `waveformEnabled`가 꺼져 있으면 애초에 시작 안 함).
 - 오버레이의 작은 점(dot)도 같은 컨셉으로 동기화됨: 전체 레벨을 100ms 간격으로 별도의 가벼운 IPC
   채널(`player-level-update`→`level-update`)로 오버레이에 전달해서 `transform: scale()` + 글로우로
   박동시킴. 곡 제목/진행률 등을 담는 무거운 `player-state-update`와 분리해서 빈도를 높게 유지.
@@ -167,11 +174,22 @@ MediaElementSource
   포함해 오버레이에 다시 뿌려줌 — 두 방향 다 빠짐없이 `broadcastState()`를 호출하도록 되어 있는지 주의
   (한쪽만 빠뜨리면 창이 떠 있는 동안 서로 다른 값을 보여주는 버그가 남).
 
-### 4.11 알려진 버그: 트레이 아이콘이 안 보이던 문제
-- 원인: `build/icon.ico`에 16~256px 여러 사이즈가 들어있는데, `nativeImage.createFromPath()`가 기본으로
-  가장 큰 프레임(256×256)을 골라서 `Tray`에 그대로 넘기면 Windows 알림 영역에 제대로 렌더링되지 않음.
-- 해결: `nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })`로 명시적으로 줄여서
-  `Tray`에 전달. 아이콘 관련 기능을 추가/수정할 때 이 리사이즈를 빠뜨리지 않을 것.
+### 4.11 알려진 버그(해결됨): 트레이 아이콘이 투명하게 보이던 문제
+- **진짜 원인**: `build/` 폴더는 electron-builder가 exe/설치파일 아이콘을 만들 때만 쓰는 폴더라서,
+  **패키징된 앱에는 아예 포함되지 않는다.** 그런데 `createTray()`가 런타임에
+  `path.join(__dirname, '..', 'build', 'icon.ico')`를 직접 읽으려고 했으니, 설치된 앱에서는 그 경로에
+  파일이 없어 `nativeImage`가 빈 이미지를 반환 → `Tray`가 빈(투명한) 아이콘으로 뜸. 개발 모드(`npm start`)
+  에서는 `build/`가 프로젝트 폴더에 실제로 있어서 이 버그가 재현되지 않았던 것도 원인 파악을 늦춘 요인.
+  (처음엔 "256px 프레임을 그대로 써서 안 보인다"고 잘못 진단하고 `.resize({width:16,height:16})`만
+  적용했었는데, 그건 진짜 원인이 아니었음 — 파일 자체가 없었으니 리사이즈해도 여전히 빈 이미지였음.)
+- **해결**: `build/icon.ico`와 트레이 전용 `build/tray-icon.png`를 `package.json`의 `extraResources`에
+  추가해서 실제로 패키징되게 하고, `getPackagedAsset(filename, devSubdir)` 헬퍼로 packaged/dev 경로를
+  일관되게 처리 (§6의 업데이트 토큰/인트로 영상과 동일한 패턴). **런타임에 `fs`나 `nativeImage`로 읽는
+  파일은 전부 이 헬퍼를 거치거나 `extraResources`에 등록되어 있는지 확인할 것** — 새 애셋을 추가할 때
+  가장 흔하게 반복될 만한 실수.
+- 트레이 아이콘은 `build/icon.ico`(멀티 사이즈)를 런타임에 리사이즈하지 않고, 미리 32×32로 렌더링해둔
+  `build/tray-icon.png`를 그대로 사용 — 멀티 프레임 `.ico`에서 프레임을 골라 리사이즈하는 것보다 훨씬
+  예측 가능함.
 
 ## 5. 프로세스 간 통신(IPC) 채널 요약
 
