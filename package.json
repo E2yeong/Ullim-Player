@@ -1,6 +1,6 @@
 {
   "name": "ullim",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Ullim - 로컬 mp3/mp4 음악 재생 프로그램 (플레이리스트, 반복재생, EQ)",
   "main": "src/main.js",
   "scripts": {
@@ -37,6 +37,14 @@
       {
         "from": "assets/Ullim_intro.mp4",
         "to": "Ullim_intro.mp4"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      },
+      {
+        "from": "build/tray-icon.png",
+        "to": "tray-icon.png"
       }
     ],
     "directories": {

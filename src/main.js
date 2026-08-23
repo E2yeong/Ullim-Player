@@ -1,3 +1,7 @@
+// Ullim main process: creates and owns all BrowserWindows (main, overlay,
+// splash), the system tray, the settings file, and the electron-updater
+// wiring. Renderers never touch Node/Electron APIs directly (contextIsolation
+// is on everywhere) — they go through the preload scripts' IPC calls below.
 const { app, BrowserWindow, ipcMain, dialog, Menu, screen, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -7,6 +11,23 @@ let mainWindow;
 let overlayWindow = null;
 let splashWindow = null;
 let tray = null;
+
+// Windows we create don't need Node integration, so they all share the same
+// locked-down preferences; only `preload` differs per window.
+const SECURE_WEB_PREFERENCES = { contextIsolation: true, nodeIntegration: false, sandbox: false };
+
+// Files under build/ and assets/ (icons, the intro video) only exist next to
+// the source at dev time. electron-builder does NOT bundle those folders into
+// the packaged app by default — they have to be listed under extraResources
+// in package.json and read back from process.resourcesPath at runtime, or
+// the file silently doesn't exist once installed (this is exactly what broke
+// the tray icon: it rendered blank because nativeImage got a path to a file
+// that wasn't there in the packaged build).
+function getPackagedAsset(filename, devSubdir = '') {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, filename)
+    : path.join(__dirname, '..', devSubdir, filename);
+}
 
 // ---------- Persisted player settings (merge-safe: renderer and main both write partial updates) ----------
 function getSettingsPath() {
@@ -56,13 +77,8 @@ function createWindow(startHidden) {
     backgroundColor: '#14141a',
     autoHideMenuBar: true,
     show: !startHidden,
-    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
+    icon: getPackagedAsset('icon.ico', 'build'),
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), ...SECURE_WEB_PREFERENCES }
   });
 
   Menu.setApplicationMenu(null);
@@ -87,10 +103,11 @@ function createWindow(startHidden) {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, '..', 'build', 'icon.ico');
-  // the .ico has multiple sizes up to 256x256; nativeImage picks the largest by
-  // default, which Windows fails to render properly in the notification area.
-  const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+  // A dedicated, pre-rendered 32x32 PNG is used here instead of build/icon.ico:
+  // extracting a frame from the multi-size .ico and resizing it at runtime
+  // rendered as a blank/transparent icon in the Windows notification area.
+  const iconPath = getPackagedAsset('tray-icon.png', 'build');
+  const icon = nativeImage.createFromPath(iconPath);
   tray = new Tray(icon);
   tray.setToolTip('Ullim');
 
@@ -137,9 +154,7 @@ function createTray() {
 
 // ---------- Splash intro video ----------
 function getIntroVideoPath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'Ullim_intro.mp4')
-    : path.join(__dirname, '..', 'assets', 'Ullim_intro.mp4');
+  return getPackagedAsset('Ullim_intro.mp4', 'assets');
 }
 
 function createSplashWindow(onDone) {
@@ -165,13 +180,8 @@ function createSplashWindow(onDone) {
     skipTaskbar: true,
     alwaysOnTop: true,
     backgroundColor: '#000000',
-    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload-splash.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
+    icon: getPackagedAsset('icon.ico', 'build'),
+    webPreferences: { preload: path.join(__dirname, 'preload-splash.js'), ...SECURE_WEB_PREFERENCES }
   });
 
   splashWindow.loadFile(path.join(__dirname, 'splash', 'index.html'));
@@ -244,12 +254,7 @@ function createOverlayWindow() {
     backgroundColor: '#00000000',
     hasShadow: true,
     alwaysOnTop: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload-overlay.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
+    webPreferences: { preload: path.join(__dirname, 'preload-overlay.js'), ...SECURE_WEB_PREFERENCES }
   });
 
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
@@ -281,11 +286,8 @@ function createOverlayWindow() {
 
 // ---------- Auto update ----------
 function getUpdateToken() {
-  const tokenPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'update-token.txt')
-    : path.join(__dirname, '..', 'update-token.txt');
   try {
-    return fs.readFileSync(tokenPath, 'utf8').trim() || null;
+    return fs.readFileSync(getPackagedAsset('update-token.txt'), 'utf8').trim() || null;
   } catch {
     return null;
   }
@@ -344,6 +346,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// ---------- IPC: main window ----------
 ipcMain.handle('open-files-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: '음악/영상 파일 선택',
@@ -357,6 +360,7 @@ ipcMain.handle('open-files-dialog', async () => {
   return result.filePaths;
 });
 
+// ---------- IPC: overlay window ----------
 ipcMain.handle('toggle-overlay', async () => {
   if (overlayWindow) {
     overlayWindow.close();
@@ -395,6 +399,7 @@ ipcMain.on('player-level-update', (_event, level) => {
   }
 });
 
+// ---------- IPC: auto update ----------
 ipcMain.handle('get-app-version', () => app.getVersion());
 
 ipcMain.handle('check-for-update', async () => {
@@ -417,6 +422,7 @@ ipcMain.handle('install-update', () => {
   autoUpdater.quitAndInstall();
 });
 
+// ---------- IPC: settings ----------
 ipcMain.handle('load-settings', () => {
   const data = readSettingsFile();
   if (Object.keys(data).length === 0) return null;
@@ -434,6 +440,7 @@ ipcMain.on('save-settings', (_event, data) => {
   writeSettingsFile(data);
 });
 
+// ---------- IPC: splash window ----------
 ipcMain.handle('get-intro-video-url', () => {
   const p = getIntroVideoPath();
   const encoded = encodeURI(p.replace(/\\/g, '/'));

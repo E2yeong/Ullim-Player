@@ -1,3 +1,4 @@
+// Exposes window.overlayApi to the overlay (mini player) window only.
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('overlayApi', {

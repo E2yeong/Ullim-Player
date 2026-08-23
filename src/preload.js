@@ -1,3 +1,6 @@
+// Exposes a narrow, explicit API (window.api) to the main window's renderer.
+// contextIsolation means the renderer can't reach ipcRenderer/Node directly —
+// everything it can do to the main process has to be listed here.
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {

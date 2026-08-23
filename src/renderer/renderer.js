@@ -1,3 +1,7 @@
+// Main window renderer: playback, playlist, the 8-band EQ/reverb graph, the
+// waveform visualizer, settings persistence, and the auto-update UI. Talks to
+// the overlay window and the main process only through window.api (see
+// preload.js) — never directly, since contextIsolation is on.
 (() => {
   'use strict';
 
@@ -8,6 +12,7 @@
     repeatMode: 'off',  // off -> all -> one
     shuffle: false,
     eqEnabled: true,
+    waveformEnabled: true,
     seeking: false
   };
 
@@ -31,6 +36,7 @@
   const btnAddFiles = document.getElementById('btnAddFiles');
   const btnClearList = document.getElementById('btnClearList');
   const btnEqToggle = document.getElementById('btnEqToggle');
+  const btnWaveToggle = document.getElementById('btnWaveToggle');
 
   const appVersionEl = document.getElementById('appVersion');
   const btnCheckUpdate = document.getElementById('btnCheckUpdate');
@@ -92,7 +98,8 @@
   let sourceNode = null;
   let eqFilters = [];
   let dryGain, wetGain, convolver, masterGain, limiter, analyser;
-  let analyserData = null;
+  let analyserData = null; // frequency-domain samples, for the overall level
+  let waveformData = null; // time-domain samples, for the waveform shape
 
   function buildImpulseResponse(ctx, seconds, decay) {
     const rate = ctx.sampleRate;
@@ -158,9 +165,10 @@
     limiter.connect(audioCtx.destination);
 
     analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
+    analyser.fftSize = 512;
     analyser.smoothingTimeConstant = 0.8;
     analyserData = new Uint8Array(analyser.frequencyBinCount);
+    waveformData = new Uint8Array(analyser.fftSize);
     masterGain.connect(analyser); // tap for visualization only, not in the audible path
 
     applyEqValues();
@@ -177,14 +185,38 @@
     dryGain.gain.value = 0.92; // small constant headroom so wet doesn't clip; independent of reverb amount
   }
 
-  // ---------- Ripple visualizer ----------
+  // Sets one EQ band's slider + label + the actual filter gain. Shared by direct
+  // slider drags, presets, saved-settings restore, and overlay remote commands
+  // so all four stay in sync instead of duplicating the same four lines each.
+  function applyEqBand(index, value) {
+    const slider = eqSliderEls[index];
+    if (!slider) return;
+    slider.value = value;
+    eqValEls[index].textContent = value;
+    applyEqValues();
+  }
+
+  // Same idea as applyEqBand, but for the single reverb slider.
+  function applyReverb(value) {
+    reverbSlider.value = value;
+    updateRangeFill(reverbSlider);
+    valReverb.textContent = value + ' %';
+    applyEqValues();
+  }
+
+  // ---------- Waveform visualizer ----------
+  // A persistent horizontal waveform (not transient ripples) drawn from the
+  // analyser's time-domain data. Each of WAVE_POINTS buckets holds an
+  // "envelope" value that jumps up instantly on a loud sample but decays
+  // slowly (WAVE_DECAY per frame), so peaks linger and the shape reads as a
+  // smooth, sustained wave instead of a flickery one.
   const rippleCanvas = document.getElementById('rippleCanvas');
   const rippleCtx = rippleCanvas.getContext('2d');
   const coverNoteEl = document.querySelector('.cover-note');
-  let ripples = [];
+  const WAVE_POINTS = 48;
+  const WAVE_DECAY = 0.93;
+  let waveEnvelope = new Array(WAVE_POINTS).fill(0);
   let rippleRafId = null;
-  let lastRippleTime = 0;
-  let bassHistory = [];
   let lastLevelBroadcast = 0;
 
   function resizeRippleCanvas() {
@@ -195,17 +227,9 @@
     rippleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  function getBassLevel() {
-    if (!analyser || !analyserData) return 0;
-    analyser.getByteFrequencyData(analyserData);
-    const bins = Math.min(8, analyserData.length);
-    let sum = 0;
-    for (let i = 0; i < bins; i++) sum += analyserData[i];
-    return sum / bins / 255;
-  }
-
   function getOverallLevel() {
     if (!analyser || !analyserData) return 0;
+    analyser.getByteFrequencyData(analyserData);
     let sum = 0;
     for (let i = 0; i < analyserData.length; i++) sum += analyserData[i];
     return sum / analyserData.length / 255;
@@ -219,7 +243,65 @@
     window.api.sendPlayerLevel(level);
   }
 
-  function rippleTick(now) {
+  // Draws a smooth curve through `points` using quadratic curves through
+  // successive midpoints, which avoids the jagged look of straight segments.
+  function tracePath(ctx, points) {
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length - 1; i++) {
+      const midX = (points[i].x + points[i + 1].x) / 2;
+      const midY = (points[i].y + points[i + 1].y) / 2;
+      ctx.quadraticCurveTo(points[i].x, points[i].y, midX, midY);
+    }
+    const last = points[points.length - 1];
+    ctx.lineTo(last.x, last.y);
+  }
+
+  function updateWaveEnvelope() {
+    if (!analyser || !waveformData) return;
+    analyser.getByteTimeDomainData(waveformData);
+    const bucketSize = waveformData.length / WAVE_POINTS;
+    for (let i = 0; i < WAVE_POINTS; i++) {
+      let maxDeviation = 0;
+      const start = Math.floor(i * bucketSize);
+      const end = Math.floor((i + 1) * bucketSize);
+      for (let j = start; j < end; j++) {
+        const deviation = Math.abs(waveformData[j] - 128) / 128; // 0..1
+        if (deviation > maxDeviation) maxDeviation = deviation;
+      }
+      waveEnvelope[i] = Math.max(maxDeviation, waveEnvelope[i] * WAVE_DECAY);
+    }
+  }
+
+  function drawWaveform(w, h) {
+    const midY = h / 2;
+    const stepX = w / (WAVE_POINTS - 1);
+    const amplitude = h * 0.4;
+
+    const topPoints = waveEnvelope.map((v, i) => ({ x: i * stepX, y: midY - v * amplitude }));
+    const bottomPoints = waveEnvelope.map((v, i) => ({ x: i * stepX, y: midY + v * amplitude })).reverse();
+
+    rippleCtx.clearRect(0, 0, w, h);
+    rippleCtx.beginPath();
+    tracePath(rippleCtx, topPoints);
+    tracePath(rippleCtx, bottomPoints);
+    rippleCtx.closePath();
+
+    const gradient = rippleCtx.createLinearGradient(0, 0, w, 0);
+    gradient.addColorStop(0, 'rgba(108, 92, 231, 0.12)');
+    gradient.addColorStop(0.5, 'rgba(160, 146, 255, 0.55)');
+    gradient.addColorStop(1, 'rgba(108, 92, 231, 0.12)');
+    rippleCtx.fillStyle = gradient;
+    rippleCtx.shadowColor = 'rgba(139, 124, 240, 0.55)';
+    rippleCtx.shadowBlur = 18;
+    rippleCtx.fill();
+
+    rippleCtx.shadowBlur = 0;
+    rippleCtx.lineWidth = 1.5;
+    rippleCtx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+    rippleCtx.stroke();
+  }
+
+  function rippleTick() {
     rippleRafId = requestAnimationFrame(rippleTick);
 
     const overall = getOverallLevel();
@@ -231,39 +313,15 @@
     const w = rect.width, h = rect.height;
     if (w === 0 || h === 0) return;
 
-    const bass = getBassLevel();
-    bassHistory.push(bass);
-    if (bassHistory.length > 30) bassHistory.shift();
-    const avgBass = bassHistory.reduce((a, b) => a + b, 0) / bassHistory.length;
-
-    if (bass > avgBass * 1.35 + 0.06 && now - lastRippleTime > 180) {
-      lastRippleTime = now;
-      ripples.push({ radius: 20, alpha: 0.55 + bass * 0.4 });
-    }
-
-    rippleCtx.clearRect(0, 0, w, h);
-    const cx = w / 2, cy = h / 2;
-    ripples = ripples.filter((r) => r.alpha > 0.01 && r.radius < Math.max(w, h) * 0.75);
-    for (const r of ripples) {
-      r.radius += 1.6;
-      r.alpha *= 0.965;
-      rippleCtx.beginPath();
-      rippleCtx.arc(cx, cy, r.radius, 0, Math.PI * 2);
-      rippleCtx.strokeStyle = `rgba(108, 92, 231, ${r.alpha})`;
-      rippleCtx.lineWidth = 2;
-      rippleCtx.stroke();
-    }
-
-    if (coverNoteEl) {
-      coverNoteEl.style.transform = `scale(${1 + overall * 0.18})`;
-    }
+    updateWaveEnvelope();
+    drawWaveform(w, h);
   }
 
   function startRippleLoop() {
-    if (rippleRafId) return;
-    lastRippleTime = 0;
-    bassHistory = [];
+    if (rippleRafId || !state.waveformEnabled) return;
+    waveEnvelope = new Array(WAVE_POINTS).fill(0);
     resizeRippleCanvas();
+    if (coverNoteEl) coverNoteEl.classList.add('faded');
     rippleRafId = requestAnimationFrame(rippleTick);
   }
 
@@ -272,9 +330,8 @@
       cancelAnimationFrame(rippleRafId);
       rippleRafId = null;
     }
-    ripples = [];
     if (rippleCtx) rippleCtx.clearRect(0, 0, rippleCanvas.width, rippleCanvas.height);
-    if (coverNoteEl) coverNoteEl.style.transform = 'scale(1)';
+    if (coverNoteEl) coverNoteEl.classList.remove('faded');
   }
 
   window.addEventListener('resize', () => {
@@ -423,6 +480,9 @@
     }
   }
 
+  // Returns the track index to play next/previous, or -1 if playback should
+  // stop (end of list with repeat off). `forward` is ignored in shuffle mode
+  // since "previous" doesn't really mean anything for a random order.
   function pickNextIndex(forward) {
     const n = state.tracks.length;
     if (n === 0) return -1;
@@ -536,18 +596,11 @@
         }
         break;
       case 'eq-band':
-        if (eqSliderEls[cmd.index]) {
-          eqSliderEls[cmd.index].value = cmd.value;
-          eqValEls[cmd.index].textContent = cmd.value;
-          applyEqValues();
-          scheduleSave();
-        }
+        applyEqBand(cmd.index, cmd.value);
+        scheduleSave();
         break;
       case 'eq-reverb':
-        reverbSlider.value = cmd.value;
-        updateRangeFill(reverbSlider);
-        valReverb.textContent = cmd.value + ' %';
-        applyEqValues();
+        applyReverb(cmd.value);
         scheduleSave();
         break;
     }
@@ -564,6 +617,10 @@
   });
 
   // ---------- Persisted settings ----------
+  // readyToSave stays false until restoreSettings() finishes applying the
+  // saved file to the UI. Without this guard, the default (empty) state set
+  // during page init would trigger a save and overwrite the real saved file
+  // before it's even been read back.
   let readyToSave = false;
   let saveTimer = null;
 
@@ -574,6 +631,7 @@
       repeatMode: state.repeatMode,
       shuffle: state.shuffle,
       eqEnabled: state.eqEnabled,
+      waveformEnabled: state.waveformEnabled,
       volume: mediaEl.volume,
       eq: {
         bands: eqSliderEls.map((s) => Number(s.value)),
@@ -607,18 +665,18 @@
     if (data) {
       if (data.eq) {
         if (Array.isArray(data.eq.bands)) {
-          eqSliderEls.forEach((s, i) => {
-            s.value = data.eq.bands[i] ?? 0;
-            eqValEls[i].textContent = s.value;
-          });
+          data.eq.bands.forEach((value, i) => applyEqBand(i, value ?? 0));
         }
-        reverbSlider.value = data.eq.reverb ?? 0;
-        valReverb.textContent = `${reverbSlider.value} %`;
+        applyReverb(data.eq.reverb ?? 0);
       }
       if (typeof data.eqEnabled === 'boolean') {
         state.eqEnabled = data.eqEnabled;
         btnEqToggle.classList.toggle('on', state.eqEnabled);
         btnEqToggle.textContent = state.eqEnabled ? 'EQ ON' : 'EQ OFF';
+      }
+      if (typeof data.waveformEnabled === 'boolean') {
+        state.waveformEnabled = data.waveformEnabled;
+        btnWaveToggle.classList.toggle('off', !state.waveformEnabled);
       }
       if (data.repeatMode) {
         state.repeatMode = data.repeatMode;
@@ -632,7 +690,7 @@
         mediaEl.volume = data.volume;
         volumeBar.value = String(Math.round(data.volume * 100));
       }
-      [reverbSlider, volumeBar].forEach(updateRangeFill);
+      updateRangeFill(volumeBar); // reverbSlider's fill was already set by applyReverb() above
 
       if (Array.isArray(data.tracks) && data.tracks.length) {
         state.tracks = data.tracks;
@@ -747,6 +805,17 @@
     scheduleSave();
   });
 
+  btnWaveToggle.addEventListener('click', () => {
+    state.waveformEnabled = !state.waveformEnabled;
+    btnWaveToggle.classList.toggle('off', !state.waveformEnabled);
+    if (state.waveformEnabled) {
+      if (!mediaEl.paused) startRippleLoop();
+    } else {
+      stopRippleLoop();
+    }
+    scheduleSave();
+  });
+
   mediaEl.addEventListener('play', () => { setPlayIcon(true); broadcastState(); startRippleLoop(); });
   mediaEl.addEventListener('pause', () => { setPlayIcon(false); broadcastState(); stopRippleLoop(); });
   mediaEl.addEventListener('ended', () => playNext(true));
@@ -756,6 +825,10 @@
     updateCoverVisibility(false);
   });
 
+  // timeupdate fires many times a second; broadcastState() is throttled to
+  // every 500ms so the overlay's progress bar still feels live without
+  // flooding the IPC channel (the audio-level pings on a separate, faster
+  // channel — see broadcastLevel() above).
   let lastOverlayBroadcast = 0;
   mediaEl.addEventListener('timeupdate', () => {
     if (state.seeking) return;
@@ -792,23 +865,17 @@
 
   eqSliderEls.forEach((slider, i) => {
     slider.addEventListener('input', () => {
-      eqValEls[i].textContent = slider.value;
-      applyEqValues();
+      applyEqBand(i, slider.value);
       scheduleSave();
       broadcastState();
     });
   });
 
-  function wireEqSlider(slider, label, unit, fmt) {
-    slider.addEventListener('input', () => {
-      label.textContent = fmt ? fmt(slider.value) : `${slider.value}${unit}`;
-      updateRangeFill(slider);
-      applyEqValues();
-      scheduleSave();
-      broadcastState();
-    });
-  }
-  wireEqSlider(reverbSlider, valReverb, ' %');
+  reverbSlider.addEventListener('input', () => {
+    applyReverb(reverbSlider.value);
+    scheduleSave();
+    broadcastState();
+  });
 
   // Band order: 60, 150, 400, 1K, 2.5K, 6K, 12K, 16K
   const EQ_PRESETS = {
@@ -822,14 +889,8 @@
     btn.addEventListener('click', () => {
       const p = EQ_PRESETS[btn.dataset.preset];
       if (!p) return;
-      eqSliderEls.forEach((slider, i) => {
-        slider.value = p.bands[i];
-        eqValEls[i].textContent = slider.value;
-      });
-      reverbSlider.value = p.reverb;
-      updateRangeFill(reverbSlider);
-      valReverb.textContent = p.reverb + ' %';
-      applyEqValues();
+      p.bands.forEach((value, i) => applyEqBand(i, value));
+      applyReverb(p.reverb);
       scheduleSave();
       broadcastState();
     });

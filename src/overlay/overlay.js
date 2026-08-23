@@ -1,3 +1,8 @@
+// Overlay (mini player) renderer. This window is a thin remote control: it
+// never touches audio/playback directly. Button/slider interactions send
+// commands to the main window via window.overlayApi.sendCommand(), and the
+// main window is the source of truth — it echoes the real state back through
+// onState()/onLevel(), which is what actually moves these sliders/labels.
 (() => {
   'use strict';
 
@@ -20,6 +25,9 @@
   const EQ_MIN = -36;
   const EQ_MAX = 36;
 
+  // While the user is actively dragging a slider, incoming onState() updates
+  // for that control are skipped so they don't fight the drag and make the
+  // thumb jump around mid-gesture.
   let volumeDragging = false;
   let seekDragging = false;
   let eqDragging = false;

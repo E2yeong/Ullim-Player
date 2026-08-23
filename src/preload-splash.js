@@ -1,3 +1,4 @@
+// Exposes window.splashApi to the intro-video splash window only.
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('splashApi', {
