@@ -86,7 +86,8 @@
     trebleFilter.frequency.value = 3500;
 
     convolver = audioCtx.createConvolver();
-    convolver.buffer = buildImpulseResponse(audioCtx, 2.5, 2.2);
+    convolver.normalize = true;
+    convolver.buffer = buildImpulseResponse(audioCtx, 1.4, 2.8);
 
     dryGain = audioCtx.createGain();
     wetGain = audioCtx.createGain();
@@ -117,9 +118,9 @@
     bassFilter.gain.value = enabled ? Number(bassSlider.value) : 0;
     midFilter.gain.value = enabled ? Number(midSlider.value) : 0;
     trebleFilter.gain.value = enabled ? Number(trebleSlider.value) : 0;
-    const wet = enabled ? Number(reverbSlider.value) / 100 : 0;
+    const wet = enabled ? (Number(reverbSlider.value) / 100) * 0.4 : 0;
     wetGain.gain.value = wet;
-    dryGain.gain.value = 1 - wet * 0.6;
+    dryGain.gain.value = 0.92; // small constant headroom so wet doesn't clip; independent of reverb amount
   }
 
   // ---------- Playlist helpers ----------
