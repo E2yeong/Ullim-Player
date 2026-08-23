@@ -1,4 +1,8 @@
-# Music Player Pro — 재현/재구축 명세서
+# Ullim — 재현/재구축 명세서
+
+> 앱 이름은 **Ullim**(울림)이지만, GitHub 저장소는 처음 만들었을 때 이름 그대로
+> `E2yeong/music-player-pro`를 계속 쓰고 있다 (저장소 이름 변경은 별도로 하지 않음).
+> `package.json`의 `name`/`productName`은 `ullim`/`Ullim`, `appId`는 `com.local.ullim`.
 
 이 문서는 이 프로젝트를 처음부터 다시 만들어야 할 때(다른 PC, 다른 이름, 다른 저장소 등) 참고할 수 있도록
 기능·아키텍처·설정 방법을 정리한 문서입니다. 코드를 직접 읽지 않아도 이 문서만 보고 동일한 앱을
@@ -22,15 +26,18 @@ GitHub Releases 기반 자동 업데이트를 갖춤.
 ## 3. 폴더 구조
 
 ```
-Music_pro/
+Music_pro/                # 로컬 프로젝트 폴더명(디스크상 이름). 앱 표시 이름은 Ullim.
   package.json          # electron-builder 설정(build 필드) 포함
   update-token.txt       # (git에 없음) private repo 읽기 전용 fine-grained PAT, 로컬에만 존재
   build/
     icon.ico              # 앱 아이콘 (창/트레이/설치파일 아이콘 전부 이 파일 하나로 사용)
+  assets/
+    Ullim_intro.mp4        # 실행 시 재생되는 인트로 영상 (git에 커밋됨, extraResources로 배포)
   src/
     main.js               # Electron 메인 프로세스 (창 생성, IPC, 트레이, 자동 업데이트, 설정 파일 I/O)
     preload.js             # 메인 창용 contextBridge API (window.api)
     preload-overlay.js      # 오버레이 창용 contextBridge API (window.overlayApi)
+    preload-splash.js       # 인트로 영상 창용 contextBridge API (window.splashApi)
     renderer/
       index.html
       style.css
@@ -39,6 +46,9 @@ Music_pro/
       index.html
       overlay.css
       overlay.js           # 항상 위 미니 플레이어 로직
+    splash/
+      index.html
+      splash.js             # 인트로 영상 재생, 종료/건너뛰기 시 메인 창에 바통 전달
 ```
 
 ## 4. 핵심 기능 (동작 방식 포함)
@@ -91,6 +101,10 @@ MediaElementSource
   메인 프로세스가 직접 저장하는 `overlayBounds` 같은 필드를 덮어쓰지 않도록 항상 기존 파일을 읽어 병합
   후 저장.
 - 앱 시작 시 저장된 트랙 경로 중 실제로 존재하지 않는 파일은 자동으로 목록에서 제외 (`fs.existsSync`).
+- **이름 변경 시 마이그레이션 필요**: `userData` 경로는 `package.json`의 `name` 필드를 따라가므로
+  (`%APPDATA%\<name>`), 앱 이름을 바꾸면(`music-player-pro` → `ullim`) 예전 설정 파일을 못 찾게 된다.
+  `migrateOldSettingsIfNeeded()`가 새 경로에 파일이 없을 때만 옛 폴더(`music-player-pro`)의
+  `player-settings.json`을 한 번 복사해 옴 — 이름을 또 바꾸게 되면 이 함수의 옛 경로도 갱신할 것.
 - 렌더러의 각 상태 변경 지점(EQ 슬라이더, 볼륨, 반복/셔플, 트랙 추가/삭제/재생)마다 400ms 디바운스로
   저장, 창 종료(`beforeunload`) 시 즉시 flush.
 
@@ -112,7 +126,18 @@ MediaElementSource
   "vX.X.X 다운로드"로 바뀜 → 클릭 시 `downloadUpdate()` → 완료되면 "재시작 후 설치" → `quitAndInstall()`.
   개발 모드(`app.isPackaged === false`)에서는 업데이트 확인을 하지 않고 안내 메시지만 표시.
 
-### 4.7 EQ 확장 히스토리 (참고)
+### 4.7 실행 시 인트로 영상
+- 앱이 콜드 스타트할 때(트레이에서 창을 다시 열 때는 X) `assets/Ullim_intro.mp4`를 재생하는 별도의
+  frameless 스플래시 창을 먼저 띄움. 메인 창은 `show:false`로 미리 생성해두고, 영상이 끝나거나
+  ("ended"/"error" 이벤트) 사용자가 "건너뛰기"를 누르면 스플래시 창을 닫고 메인 창을 보여줌.
+- 영상이 20초 안에 끝나지 않으면(코덱 문제 등) 안전장치 타이머로 자동으로 건너뜀.
+- 영상 파일은 `app.asar` 안에 넣으면 `<video src="file://...">` 로 재생이 안 될 수 있어(ASAR는 진짜
+  디렉터리가 아니라서 Chromium의 미디어 로더가 직접 못 읽음) **asar 밖의 `extraResources`**로 배포함
+  (`update-token.txt`와 같은 방식). 스플래시 창은 `data:` URL이 아니라 실제 `loadFile()`로 정적
+  `src/splash/index.html`을 불러오고, 영상 경로는 `get-intro-video-url` IPC로 받아온다
+  (`data:` URL은 오리진이 분리되어 `file://` 리소스를 못 불러올 수 있어서 피함).
+
+### 4.8 EQ 확장 히스토리 (참고)
 1. 처음엔 Bass/Mid/Treble 3밴드, ±15dB — "악기별 자동 부스트/감쇠" 요청이 있었으나, 주파수 대역 기반
    EQ는 그 대역의 모든 소리(보컬 포함)에 동일하게 적용되어 보컬도 같이 줄어드는 한계가 있어 **실시간
    AI 음원 분리(악기별 감지)는 채택하지 않음** — 대신 8밴드로 세분화.
@@ -132,6 +157,8 @@ MediaElementSource
 | `get-app-version` / `check-for-update` / `download-update` / `install-update` | renderer→main (invoke) | 자동 업데이트 |
 | `update-status` | main→renderer | 업데이트 진행 상태 이벤트 |
 | `load-settings` / `save-settings` | renderer↔main | 설정 파일 읽기/쓰기 |
+| `get-intro-video-url` | splash→main (invoke) | 인트로 영상의 `file://` URL 조회 |
+| `splash-done` | splash→main | 인트로 영상 종료/건너뛰기 → 스플래시 창 닫고 메인 창 표시 |
 
 ## 6. 배포 절차 (재현용 명령어)
 
@@ -150,18 +177,18 @@ npm run publish
 ```
 
 **주의 — 애셋 파일명 함정**: `electron-builder`가 만드는 `dist/latest.yml`은 파일명의 공백을
-**대시(-)**로 치환한 이름(`Music-Player-Pro-Setup-1.0.0.exe`)을 기대한다. 만약 `npm run publish`
+**대시(-)**로 치환한 이름(`Ullim-Setup-1.0.0.exe`)을 기대한다. 만약 `npm run publish`
 (electron-builder 자체 업로더) 대신 `gh release upload`로 **원본 파일명(공백 포함)**을 그대로 올리면,
 GitHub이 공백을 **점(.)**으로 치환해버려서 이름이 서로 안 맞아 앱의 자동 업데이트가
-`Cannot find asset "Music-Player-Pro-Setup-x.x.x.exe"` 오류로 실패한다. `gh`로 수동 업로드할 때는 반드시
+`Cannot find asset "Ullim-Setup-x.x.x.exe"` 오류로 실패한다. `gh`로 수동 업로드할 때는 반드시
 로컬에서 파일명을 대시 버전으로 복사한 뒤 그 이름으로 올릴 것.
 
 ```bash
-cp "dist/Music Player Pro Setup 1.0.x.exe" "dist/Music-Player-Pro-Setup-1.0.x.exe"
-cp "dist/Music Player Pro Setup 1.0.x.exe.blockmap" "dist/Music-Player-Pro-Setup-1.0.x.exe.blockmap"
+cp "dist/Ullim Setup 1.0.x.exe" "dist/Ullim-Setup-1.0.x.exe"
+cp "dist/Ullim Setup 1.0.x.exe.blockmap" "dist/Ullim-Setup-1.0.x.exe.blockmap"
 gh release create vX.X.X --repo <owner>/<repo> --draft \
-  "dist/Music-Player-Pro-Setup-1.0.x.exe" \
-  "dist/Music-Player-Pro-Setup-1.0.x.exe.blockmap" \
+  "dist/Ullim-Setup-1.0.x.exe" \
+  "dist/Ullim-Setup-1.0.x.exe.blockmap" \
   "dist/latest.yml"
 # 그 다음 GitHub 웹에서 draft를 "Publish release"로 공개해야 electron-updater가 찾아냄 (draft는 안 보임)
 ```
@@ -179,7 +206,7 @@ npm run dist
 # 2. rcedit로 언팩된 exe에 아이콘 수동 삽입
 #    rcedit 바이너리는 winCodeSign 캐시 폴더 아무 데나 있음 (부분 다운로드라도 rcedit 자체는 받아짐):
 #    C:\Users\<user>\AppData\Local\electron-builder\Cache\winCodeSign\<hash>\rcedit-x64.exe
-"<rcedit-x64.exe 경로>" "dist\win-unpacked\Music Player Pro.exe" --set-icon "build\icon.ico"
+"<rcedit-x64.exe 경로>" "dist\win-unpacked\Ullim.exe" --set-icon "build\icon.ico"
 
 # 3. 아이콘이 박힌 win-unpacked를 그대로 다시 NSIS로 포장 (재패키징 없이)
 npx electron-builder --prepackaged "dist\win-unpacked" --win nsis
@@ -187,7 +214,7 @@ npx electron-builder --prepackaged "dist\win-unpacked" --win nsis
 `--prepackaged`는 electron-builder가 처음부터 다시 패키징하지 않고, 이미 있는 `win-unpacked` 폴더를
 그대로 설치파일로 감싸기만 하므로 방금 rcedit로 심은 아이콘이 유지된다. NSIS 설치파일(`Setup.exe`)
 자체의 아이콘은 `signAndEditExecutable`과 무관하게 `build.win.icon` 설정만으로 정상 반영된다 —
-문제는 오직 앱 내부의 실행 파일(`Music Player Pro.exe`)에만 있다.
+문제는 오직 앱 내부의 실행 파일(`Ullim.exe`)에만 있다.
 
 ## 7. 이 PC에서 겪었던 환경 이슈 (재현 시 참고)
 

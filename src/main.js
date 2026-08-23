@@ -5,11 +5,29 @@ const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
 let overlayWindow = null;
+let splashWindow = null;
 let tray = null;
 
 // ---------- Persisted player settings (merge-safe: renderer and main both write partial updates) ----------
 function getSettingsPath() {
   return path.join(app.getPath('userData'), 'player-settings.json');
+}
+
+// The app was renamed from "music-player-pro" to "ullim", which moves userData
+// to a new folder. Bring over the old settings file once so nobody loses their
+// playlist/EQ on the first launch after updating.
+function migrateOldSettingsIfNeeded() {
+  const newPath = getSettingsPath();
+  if (fs.existsSync(newPath)) return;
+  const oldPath = path.join(path.dirname(app.getPath('userData')), 'music-player-pro', 'player-settings.json');
+  try {
+    if (fs.existsSync(oldPath)) {
+      fs.mkdirSync(path.dirname(newPath), { recursive: true });
+      fs.copyFileSync(oldPath, newPath);
+    }
+  } catch {
+    // best-effort; a missing old file just means a fresh start
+  }
 }
 
 function readSettingsFile() {
@@ -29,7 +47,7 @@ function writeSettingsFile(partial) {
   }
 }
 
-function createWindow() {
+function createWindow(startHidden) {
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 700,
@@ -37,6 +55,7 @@ function createWindow() {
     minHeight: 560,
     backgroundColor: '#14141a',
     autoHideMenuBar: true,
+    show: !startHidden,
     icon: path.join(__dirname, '..', 'build', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -70,7 +89,7 @@ function createWindow() {
 function createTray() {
   const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'icon.ico'));
   tray = new Tray(icon);
-  tray.setToolTip('Music Player Pro');
+  tray.setToolTip('Ullim');
 
   const sendRemote = (cmd) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -110,6 +129,59 @@ function createTray() {
     } else {
       mainWindow.show();
     }
+  });
+}
+
+// ---------- Splash intro video ----------
+function getIntroVideoPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'Ullim_intro.mp4')
+    : path.join(__dirname, '..', 'assets', 'Ullim_intro.mp4');
+}
+
+function createSplashWindow(onDone) {
+  const videoPath = getIntroVideoPath();
+  if (!fs.existsSync(videoPath)) {
+    onDone();
+    return;
+  }
+
+  const display = screen.getPrimaryDisplay();
+  const w = Math.min(720, Math.round(display.workAreaSize.width * 0.6));
+  const h = Math.round(w * 9 / 16);
+
+  splashWindow = new BrowserWindow({
+    width: w,
+    height: h,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: '#000000',
+    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-splash.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  splashWindow.loadFile(path.join(__dirname, 'splash', 'index.html'));
+
+  // safety net in case the video never fires 'ended' (bad codec, huge file, etc.)
+  const fallbackTimer = setTimeout(() => {
+    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
+  }, 20000);
+
+  splashWindow.on('closed', () => {
+    clearTimeout(fallbackTimer);
+    splashWindow = null;
+    onDone();
   });
 }
 
@@ -246,9 +318,14 @@ function setupAutoUpdater() {
 }
 
 app.whenReady().then(() => {
-  createWindow();
+  migrateOldSettingsIfNeeded();
+  createWindow(true);
   createTray();
   setupAutoUpdater();
+
+  createSplashWindow(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -345,4 +422,14 @@ ipcMain.handle('load-settings', () => {
 
 ipcMain.on('save-settings', (_event, data) => {
   writeSettingsFile(data);
+});
+
+ipcMain.handle('get-intro-video-url', () => {
+  const p = getIntroVideoPath();
+  const encoded = encodeURI(p.replace(/\\/g, '/'));
+  return 'file:///' + encoded.replace(/^\/+/, '');
+});
+
+ipcMain.on('splash-done', () => {
+  if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
 });

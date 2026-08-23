@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self'; style-src 'unsafe-inline'; media-src file:;" />
+<title>Ullim</title>
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+  }
+  video {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    display: block;
+    background: #000;
+  }
+  .skip {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font: 12px "Segoe UI", "Malgun Gothic", sans-serif;
+    cursor: pointer;
+    user-select: none;
+  }
+  .skip:hover { background: rgba(0, 0, 0, 0.75); }
+</style>
+</head>
+<body>
+  <video id="introVideo" autoplay></video>
+  <div class="skip" id="skipBtn">건너뛰기</div>
+  <script src="splash.js"></script>
+</body>
+</html>

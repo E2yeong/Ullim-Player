@@ -1,7 +1,7 @@
 {
-  "name": "music-player-pro",
+  "name": "ullim",
   "version": "1.0.5",
-  "description": "로컬 mp3/mp4 음악 재생 프로그램 (플레이리스트, 반복재생, EQ)",
+  "description": "Ullim - 로컬 mp3/mp4 음악 재생 프로그램 (플레이리스트, 반복재생, EQ)",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -18,8 +18,8 @@
     "electron-updater": "^6.8.9"
   },
   "build": {
-    "appId": "com.local.musicplayerpro",
-    "productName": "Music Player Pro",
+    "appId": "com.local.ullim",
+    "productName": "Ullim",
     "win": {
       "target": "nsis",
       "signAndEditExecutable": false,
@@ -33,6 +33,10 @@
       {
         "from": "update-token.txt",
         "to": "update-token.txt"
+      },
+      {
+        "from": "assets/Ullim_intro.mp4",
+        "to": "Ullim_intro.mp4"
       }
     ],
     "directories": {
