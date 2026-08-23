@@ -6,6 +6,28 @@ const { autoUpdater } = require('electron-updater');
 let mainWindow;
 let overlayWindow = null;
 
+// ---------- Persisted player settings (merge-safe: renderer and main both write partial updates) ----------
+function getSettingsPath() {
+  return path.join(app.getPath('userData'), 'player-settings.json');
+}
+
+function readSettingsFile() {
+  try {
+    return JSON.parse(fs.readFileSync(getSettingsPath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeSettingsFile(partial) {
+  const merged = { ...readSettingsFile(), ...partial };
+  try {
+    fs.writeFileSync(getSettingsPath(), JSON.stringify(merged));
+  } catch {
+    // ignore write failures (e.g. disk full)
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
@@ -34,18 +56,53 @@ function createWindow() {
   });
 }
 
-function createOverlayWindow() {
+const OVERLAY_MIN_WIDTH = 260;
+const OVERLAY_MIN_HEIGHT = 110;
+const OVERLAY_MAX_WIDTH = 640;
+const OVERLAY_MAX_HEIGHT = 320;
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getOverlayBounds() {
   const display = screen.getPrimaryDisplay();
-  const w = 340;
-  const h = 128;
+  const defaultW = 340;
+  const defaultH = 128;
+  const saved = readSettingsFile().overlayBounds;
+
+  let bounds = {
+    width: defaultW,
+    height: defaultH,
+    x: display.workArea.x + display.workArea.width - defaultW - 24,
+    y: display.workArea.y + 24
+  };
+
+  if (saved && typeof saved.width === 'number' && typeof saved.height === 'number') {
+    bounds = { ...bounds, ...saved };
+  }
+
+  bounds.width = clamp(bounds.width, OVERLAY_MIN_WIDTH, OVERLAY_MAX_WIDTH);
+  bounds.height = clamp(bounds.height, OVERLAY_MIN_HEIGHT, OVERLAY_MAX_HEIGHT);
+  // keep the window on-screen even if the saved position came from a monitor setup that's no longer connected
+  const area = display.workArea;
+  bounds.x = clamp(bounds.x, area.x, area.x + area.width - bounds.width);
+  bounds.y = clamp(bounds.y, area.y, area.y + area.height - bounds.height);
+
+  return bounds;
+}
+
+function createOverlayWindow() {
+  const bounds = getOverlayBounds();
 
   overlayWindow = new BrowserWindow({
-    width: w,
-    height: h,
-    x: display.workArea.x + display.workArea.width - w - 24,
-    y: display.workArea.y + 24,
+    ...bounds,
+    minWidth: OVERLAY_MIN_WIDTH,
+    minHeight: OVERLAY_MIN_HEIGHT,
+    maxWidth: OVERLAY_MAX_WIDTH,
+    maxHeight: OVERLAY_MAX_HEIGHT,
     frame: false,
-    resizable: false,
+    resizable: true,
     movable: true,
     minimizable: false,
     maximizable: false,
@@ -67,7 +124,20 @@ function createOverlayWindow() {
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   overlayWindow.loadFile(path.join(__dirname, 'overlay', 'index.html'));
 
+  let boundsSaveTimer = null;
+  const scheduleBoundsSave = () => {
+    clearTimeout(boundsSaveTimer);
+    boundsSaveTimer = setTimeout(() => {
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        writeSettingsFile({ overlayBounds: overlayWindow.getBounds() });
+      }
+    }, 400);
+  };
+  overlayWindow.on('resize', scheduleBoundsSave);
+  overlayWindow.on('move', scheduleBoundsSave);
+
   overlayWindow.on('closed', () => {
+    clearTimeout(boundsSaveTimer);
     overlayWindow = null;
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('overlay-closed');
@@ -197,18 +267,9 @@ ipcMain.handle('install-update', () => {
   autoUpdater.quitAndInstall();
 });
 
-// ---------- Persisted player settings ----------
-function getSettingsPath() {
-  return path.join(app.getPath('userData'), 'player-settings.json');
-}
-
 ipcMain.handle('load-settings', () => {
-  let data;
-  try {
-    data = JSON.parse(fs.readFileSync(getSettingsPath(), 'utf8'));
-  } catch {
-    return null;
-  }
+  const data = readSettingsFile();
+  if (Object.keys(data).length === 0) return null;
   if (Array.isArray(data.tracks)) {
     const original = data.tracks;
     const currentPath = original[data.currentIndex] ? original[data.currentIndex].path : null;
@@ -220,9 +281,5 @@ ipcMain.handle('load-settings', () => {
 });
 
 ipcMain.on('save-settings', (_event, data) => {
-  try {
-    fs.writeFileSync(getSettingsPath(), JSON.stringify(data));
-  } catch {
-    // ignore write failures (e.g. disk full)
-  }
+  writeSettingsFile(data);
 });

@@ -293,10 +293,56 @@ input[type="range"]::-webkit-slider-runnable-track {
 #btnEqToggle { flex: none; padding: 5px 10px; }
 #btnEqToggle.on { background: #6c5ce7; color: #fff; border-color: #6c5ce7; }
 
-.eq-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 18px;
+.eq-bands {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 4px 2px;
+}
+.eq-band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.eq-band .eq-val {
+  font-size: 10px;
+  color: #9698ac;
+  white-space: nowrap;
+}
+.eq-band .eq-freq {
+  font-size: 10px;
+  color: #6f7188;
+}
+.eq-band input[type="range"] {
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+  width: 6px;
+  height: 120px;
+  background: #2c2c3a;
+  border-radius: 3px;
+  padding: 0;
+}
+.eq-band input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 10px;
+  border-radius: 3px;
+  background: #6c5ce7;
+  cursor: pointer;
+}
+.eq-band input[type="range"]::-webkit-slider-runnable-track {
+  width: 6px;
+  background: #2c2c3a;
+  border-radius: 3px;
+}
+
+.reverb-slider {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #26262f;
 }
 .eq-slider label {
   display: flex;

@@ -69,23 +69,10 @@
         <h2>이퀄라이저</h2>
         <button id="btnEqToggle" class="icon-btn ghost" title="EQ 켜기/끄기">EQ ON</button>
       </div>
-      <div class="eq-grid">
-        <div class="eq-slider">
-          <label>Bass<span id="valBass">0 dB</span></label>
-          <input type="range" id="bassSlider" min="-15" max="15" step="1" value="0" />
-        </div>
-        <div class="eq-slider">
-          <label>Mid<span id="valMid">0 dB</span></label>
-          <input type="range" id="midSlider" min="-15" max="15" step="1" value="0" />
-        </div>
-        <div class="eq-slider">
-          <label>Treble<span id="valTreble">0 dB</span></label>
-          <input type="range" id="trebleSlider" min="-15" max="15" step="1" value="0" />
-        </div>
-        <div class="eq-slider">
-          <label>Reverb<span id="valReverb">0 %</span></label>
-          <input type="range" id="reverbSlider" min="0" max="100" step="1" value="0" />
-        </div>
+      <div class="eq-bands" id="eqBands"></div>
+      <div class="eq-slider reverb-slider">
+        <label>Reverb<span id="valReverb">0 %</span></label>
+        <input type="range" id="reverbSlider" min="0" max="100" step="1" value="0" />
       </div>
       <div class="eq-presets">
         <button class="preset-btn" data-preset="flat">Flat</button>

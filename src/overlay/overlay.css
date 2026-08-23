@@ -9,6 +9,7 @@ html, body {
 }
 
 .panel {
+  position: relative;
   width: 100%; height: 100%;
   background: rgba(20, 20, 26, 0.92);
   border: 1px solid rgba(255,255,255,0.08);
@@ -18,6 +19,18 @@ html, body {
   flex-direction: column;
   gap: 10px;
   backdrop-filter: blur(6px);
+}
+
+.resize-grip {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 0 40%, rgba(255,255,255,0.35) 40% 45%, transparent 45% 55%, rgba(255,255,255,0.35) 55% 60%, transparent 60% 100%);
 }
 
 .drag-bar {

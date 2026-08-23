@@ -36,22 +36,62 @@
   const btnCheckUpdate = document.getElementById('btnCheckUpdate');
   const updateStatusEl = document.getElementById('updateStatus');
 
-  const bassSlider = document.getElementById('bassSlider');
-  const midSlider = document.getElementById('midSlider');
-  const trebleSlider = document.getElementById('trebleSlider');
+  const eqBandsEl = document.getElementById('eqBands');
   const reverbSlider = document.getElementById('reverbSlider');
-  const valBass = document.getElementById('valBass');
-  const valMid = document.getElementById('valMid');
-  const valTreble = document.getElementById('valTreble');
   const valReverb = document.getElementById('valReverb');
 
   const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'mkv']);
 
+  // ---------- 8-band graphic EQ config ----------
+  const EQ_BANDS = [
+    { freq: 60, type: 'lowshelf', label: '60' },
+    { freq: 150, type: 'peaking', label: '150' },
+    { freq: 400, type: 'peaking', label: '400' },
+    { freq: 1000, type: 'peaking', label: '1K' },
+    { freq: 2500, type: 'peaking', label: '2.5K' },
+    { freq: 6000, type: 'peaking', label: '6K' },
+    { freq: 12000, type: 'peaking', label: '12K' },
+    { freq: 16000, type: 'highshelf', label: '16K' }
+  ];
+  const EQ_MIN = -24;
+  const EQ_MAX = 24;
+
+  const eqSliderEls = [];
+  const eqValEls = [];
+  EQ_BANDS.forEach((band, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'eq-band';
+
+    const val = document.createElement('span');
+    val.className = 'eq-val';
+    val.textContent = '0';
+
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(EQ_MIN);
+    input.max = String(EQ_MAX);
+    input.step = '1';
+    input.value = '0';
+    input.id = `eqSlider${i}`;
+
+    const freq = document.createElement('span');
+    freq.className = 'eq-freq';
+    freq.textContent = band.label;
+
+    wrap.appendChild(val);
+    wrap.appendChild(input);
+    wrap.appendChild(freq);
+    eqBandsEl.appendChild(wrap);
+
+    eqSliderEls.push(input);
+    eqValEls.push(val);
+  });
+
   // ---------- Web Audio EQ chain ----------
   let audioCtx = null;
   let sourceNode = null;
-  let bassFilter, midFilter, trebleFilter;
-  let dryGain, wetGain, convolver, masterGain;
+  let eqFilters = [];
+  let dryGain, wetGain, convolver, masterGain, limiter;
 
   function buildImpulseResponse(ctx, seconds, decay) {
     const rate = ctx.sampleRate;
@@ -72,18 +112,13 @@
 
     sourceNode = audioCtx.createMediaElementSource(mediaEl);
 
-    bassFilter = audioCtx.createBiquadFilter();
-    bassFilter.type = 'lowshelf';
-    bassFilter.frequency.value = 150;
-
-    midFilter = audioCtx.createBiquadFilter();
-    midFilter.type = 'peaking';
-    midFilter.frequency.value = 1000;
-    midFilter.Q.value = 0.9;
-
-    trebleFilter = audioCtx.createBiquadFilter();
-    trebleFilter.type = 'highshelf';
-    trebleFilter.frequency.value = 3500;
+    eqFilters = EQ_BANDS.map((band) => {
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = band.type;
+      filter.frequency.value = band.freq;
+      if (band.type === 'peaking') filter.Q.value = 1.1;
+      return filter;
+    });
 
     convolver = audioCtx.createConvolver();
     convolver.normalize = true;
@@ -96,18 +131,30 @@
     masterGain = audioCtx.createGain();
     masterGain.gain.value = 1;
 
-    // source -> bass -> mid -> treble -> [dry + convolver->wet] -> master -> destination
-    sourceNode.connect(bassFilter);
-    bassFilter.connect(midFilter);
-    midFilter.connect(trebleFilter);
+    // a soft limiter so stacking multiple +24dB band boosts doesn't clip harshly
+    limiter = audioCtx.createDynamicsCompressor();
+    limiter.threshold.value = -6;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
 
-    trebleFilter.connect(dryGain);
-    trebleFilter.connect(convolver);
+    // source -> [8 eq bands in series] -> [dry + convolver->wet] -> master -> limiter -> destination
+    let node = sourceNode;
+    for (const filter of eqFilters) {
+      node.connect(filter);
+      node = filter;
+    }
+    const lastFilter = node;
+
+    lastFilter.connect(dryGain);
+    lastFilter.connect(convolver);
     convolver.connect(wetGain);
 
     dryGain.connect(masterGain);
     wetGain.connect(masterGain);
-    masterGain.connect(audioCtx.destination);
+    masterGain.connect(limiter);
+    limiter.connect(audioCtx.destination);
 
     applyEqValues();
   }
@@ -115,10 +162,10 @@
   function applyEqValues() {
     if (!audioCtx) return;
     const enabled = state.eqEnabled;
-    bassFilter.gain.value = enabled ? Number(bassSlider.value) : 0;
-    midFilter.gain.value = enabled ? Number(midSlider.value) : 0;
-    trebleFilter.gain.value = enabled ? Number(trebleSlider.value) : 0;
-    const wet = enabled ? (Number(reverbSlider.value) / 100) * 0.4 : 0;
+    eqFilters.forEach((filter, i) => {
+      filter.gain.value = enabled ? Number(eqSliderEls[i].value) : 0;
+    });
+    const wet = enabled ? (Number(reverbSlider.value) / 100) * 0.7 : 0;
     wetGain.gain.value = wet;
     dryGain.gain.value = 0.92; // small constant headroom so wet doesn't clip; independent of reverb amount
   }
@@ -391,9 +438,7 @@
       eqEnabled: state.eqEnabled,
       volume: mediaEl.volume,
       eq: {
-        bass: Number(bassSlider.value),
-        mid: Number(midSlider.value),
-        treble: Number(trebleSlider.value),
+        bands: eqSliderEls.map((s) => Number(s.value)),
         reverb: Number(reverbSlider.value)
       }
     };
@@ -423,13 +468,13 @@
 
     if (data) {
       if (data.eq) {
-        bassSlider.value = data.eq.bass ?? 0;
-        midSlider.value = data.eq.mid ?? 0;
-        trebleSlider.value = data.eq.treble ?? 0;
+        if (Array.isArray(data.eq.bands)) {
+          eqSliderEls.forEach((s, i) => {
+            s.value = data.eq.bands[i] ?? 0;
+            eqValEls[i].textContent = s.value;
+          });
+        }
         reverbSlider.value = data.eq.reverb ?? 0;
-        valBass.textContent = `${bassSlider.value} dB`;
-        valMid.textContent = `${midSlider.value} dB`;
-        valTreble.textContent = `${trebleSlider.value} dB`;
         valReverb.textContent = `${reverbSlider.value} %`;
       }
       if (typeof data.eqEnabled === 'boolean') {
@@ -449,7 +494,7 @@
         mediaEl.volume = data.volume;
         volumeBar.value = String(Math.round(data.volume * 100));
       }
-      [bassSlider, midSlider, trebleSlider, reverbSlider, volumeBar].forEach(updateRangeFill);
+      [reverbSlider, volumeBar].forEach(updateRangeFill);
 
       if (Array.isArray(data.tracks) && data.tracks.length) {
         state.tracks = data.tracks;
@@ -601,6 +646,14 @@
     scheduleSave();
   });
 
+  eqSliderEls.forEach((slider, i) => {
+    slider.addEventListener('input', () => {
+      eqValEls[i].textContent = slider.value;
+      applyEqValues();
+      scheduleSave();
+    });
+  });
+
   function wireEqSlider(slider, label, unit, fmt) {
     slider.addEventListener('input', () => {
       label.textContent = fmt ? fmt(slider.value) : `${slider.value}${unit}`;
@@ -609,29 +662,26 @@
       scheduleSave();
     });
   }
-  wireEqSlider(bassSlider, valBass, ' dB');
-  wireEqSlider(midSlider, valMid, ' dB');
-  wireEqSlider(trebleSlider, valTreble, ' dB');
   wireEqSlider(reverbSlider, valReverb, ' %');
+
+  // Band order: 60, 150, 400, 1K, 2.5K, 6K, 12K, 16K
+  const EQ_PRESETS = {
+    flat: { bands: [0, 0, 0, 0, 0, 0, 0, 0], reverb: 0 },
+    bassBoost: { bands: [16, 10, 3, 0, 0, 0, 0, 0], reverb: 8 },
+    vocal: { bands: [-6, -3, -2, 3, 6, 4, 1, 0], reverb: 10 },
+    hall: { bands: [1, 0, 0, 0, 0, 2, 3, 2], reverb: 65 }
+  };
 
   document.querySelectorAll('.preset-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const presets = {
-        flat: { bass: 0, mid: 0, treble: 0, reverb: 0 },
-        bassBoost: { bass: 9, mid: 1, treble: 0, reverb: 5 },
-        vocal: { bass: -3, mid: 6, treble: 3, reverb: 8 },
-        hall: { bass: 1, mid: 0, treble: 2, reverb: 55 }
-      };
-      const p = presets[btn.dataset.preset];
+      const p = EQ_PRESETS[btn.dataset.preset];
       if (!p) return;
-      bassSlider.value = p.bass;
-      midSlider.value = p.mid;
-      trebleSlider.value = p.treble;
+      eqSliderEls.forEach((slider, i) => {
+        slider.value = p.bands[i];
+        eqValEls[i].textContent = slider.value;
+      });
       reverbSlider.value = p.reverb;
-      [bassSlider, midSlider, trebleSlider, reverbSlider].forEach(updateRangeFill);
-      valBass.textContent = p.bass + ' dB';
-      valMid.textContent = p.mid + ' dB';
-      valTreble.textContent = p.treble + ' dB';
+      updateRangeFill(reverbSlider);
       valReverb.textContent = p.reverb + ' %';
       applyEqValues();
       scheduleSave();
@@ -665,7 +715,7 @@
   // Init
   volumeBar.value = 80;
   mediaEl.volume = 0.8;
-  [seekBar, volumeBar, bassSlider, midSlider, trebleSlider, reverbSlider].forEach(updateRangeFill);
+  [seekBar, volumeBar, reverbSlider].forEach(updateRangeFill);
   updateRepeatButton();
   updateCoverVisibility(true);
   restoreSettings();
