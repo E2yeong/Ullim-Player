@@ -143,6 +143,36 @@ MediaElementSource
    AI 음원 분리(악기별 감지)는 채택하지 않음** — 대신 8밴드로 세분화.
 2. 최종: 8밴드(60/150/400/1K/2.5K/6K/12K/16K), ±36dB, 리버브 최대 100% wet, 리미터로 안전장치.
 
+### 4.9 리플(파동) 비주얼라이저 — 앱 이름("울림")을 시각화한 시그니처 기능
+- `masterGain`에서 `AnalyserNode`(fftSize 256, smoothing 0.8)를 탭으로 분기 연결 (오디오 경로 자체에는
+  영향 없음, 시각화 전용).
+- 커버아트 영역(`#coverArt`, 실제 영상이 아니라 오디오 전용 재생일 때만 보임)에 `<canvas>`를 깔고,
+  매 프레임 저음 대역(첫 8개 bin)의 순간값이 최근 30프레임 평균보다 뚜렷하게(1.35배 + 여유값) 튀면
+  중심에서 퍼지는 원(ripple)을 하나 생성 — 돌 던지면 물결 퍼지는 것과 같은 방식. 전체 레벨(전 bin 평균)에
+  따라 중앙의 ♪ 아이콘도 살짝 커짐.
+- `mediaEl`의 `play`/`pause` 이벤트로 `requestAnimationFrame` 루프를 시작/정지 (재생 중이 아닐 때는
+  그리지 않아 CPU 낭비 없음).
+- 오버레이의 작은 점(dot)도 같은 컨셉으로 동기화됨: 전체 레벨을 100ms 간격으로 별도의 가벼운 IPC
+  채널(`player-level-update`→`level-update`)로 오버레이에 전달해서 `transform: scale()` + 글로우로
+  박동시킴. 곡 제목/진행률 등을 담는 무거운 `player-state-update`와 분리해서 빈도를 높게 유지.
+
+### 4.10 오버레이 EQ/리버브 미니 패널
+- 오버레이를 세로로 크게 리사이즈하면(`window.innerHeight >= 260`) 숨겨져 있던 8밴드 미니 EQ +
+  리버브 슬라이더가 나타남 (`.panel.expanded` 클래스 토글, `window`의 `resize` 이벤트로 감지).
+  이 때문에 오버레이 최대 높이(`OVERLAY_MAX_HEIGHT`)를 320→420으로 늘림.
+- 밴드 주파수/범위(±36dB)는 메인 창의 `EQ_BANDS`와 반드시 일치시켜야 함 — 빌드 시스템이 없어 상수를
+  `src/overlay/overlay.js`에도 그대로 복붙해둔 상태라, 메인 쪽 EQ 대역을 바꾸면 여기도 같이 고칠 것.
+- 양방향 동기화: 오버레이에서 슬라이더를 움직이면 `overlay-command`(`eq-band`/`eq-reverb`)로 메인에
+  전달되어 실제 EQ에 반영되고, 메인 창에서 슬라이더를 움직이면 `broadcastState()`가 `eq:{bands,reverb}`를
+  포함해 오버레이에 다시 뿌려줌 — 두 방향 다 빠짐없이 `broadcastState()`를 호출하도록 되어 있는지 주의
+  (한쪽만 빠뜨리면 창이 떠 있는 동안 서로 다른 값을 보여주는 버그가 남).
+
+### 4.11 알려진 버그: 트레이 아이콘이 안 보이던 문제
+- 원인: `build/icon.ico`에 16~256px 여러 사이즈가 들어있는데, `nativeImage.createFromPath()`가 기본으로
+  가장 큰 프레임(256×256)을 골라서 `Tray`에 그대로 넘기면 Windows 알림 영역에 제대로 렌더링되지 않음.
+- 해결: `nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })`로 명시적으로 줄여서
+  `Tray`에 전달. 아이콘 관련 기능을 추가/수정할 때 이 리사이즈를 빠뜨리지 않을 것.
+
 ## 5. 프로세스 간 통신(IPC) 채널 요약
 
 | 채널 | 방향 | 용도 |
@@ -151,7 +181,8 @@ MediaElementSource
 | `toggle-overlay` | renderer→main (invoke) | 오버레이 창 열기/닫기, 열림 여부 반환 |
 | `overlay-command` | overlay→main→renderer | 오버레이 버튼 클릭(재생/이전/다음/볼륨/탐색)을 메인 창에 전달 |
 | `overlay-close` | overlay→main | 오버레이 닫기 |
-| `player-state-update` | renderer→main→overlay | 재생 상태(제목/재생여부/볼륨/진행률 등) 오버레이에 반영 |
+| `player-state-update` | renderer→main→overlay | 재생 상태(제목/재생여부/볼륨/진행률/EQ 등) 오버레이에 반영 |
+| `player-level-update` | renderer→main→overlay | 오디오 레벨(0~1, 100ms 간격) — 오버레이 dot 박동용, 가벼운 채널 |
 | `overlay-closed` | main→renderer | 오버레이가 닫혔음을 메인 창 UI(핀 버튼)에 반영 |
 | `remote-command` | main→renderer | 오버레이 또는 트레이 메뉴에서 온 커맨드 실행 |
 | `get-app-version` / `check-for-update` / `download-update` / `install-update` | renderer→main (invoke) | 자동 업데이트 |
