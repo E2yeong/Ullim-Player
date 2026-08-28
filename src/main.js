@@ -5,6 +5,7 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, screen, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
@@ -66,6 +67,106 @@ function writeSettingsFile(partial) {
   } catch {
     // ignore write failures (e.g. disk full)
   }
+}
+
+// ---------- Lyrics (LRCLIB + local .lrc, see IPC handler 'fetch-lyrics' below) ----------
+// Runs entirely in the main process: the renderer's CSP (default-src 'self')
+// can't reach an external host directly, and this also keeps the on-disk
+// lyrics cache and local-.lrc lookup (both filesystem access) off the
+// sandboxed renderer. Electron 31 bundles Node 20, which has a global
+// fetch() in the main process — no extra HTTP dependency needed.
+function findLocalLrc(trackPath) {
+  const lrcPath = trackPath.replace(/\.[^./\\]+$/, '.lrc');
+  try {
+    if (fs.existsSync(lrcPath)) return fs.readFileSync(lrcPath, 'utf8');
+  } catch {
+    // fall through to network lookup
+  }
+  return null;
+}
+
+function getLyricsCacheDir() {
+  const dir = path.join(app.getPath('userData'), 'lyricsCache');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    // best-effort
+  }
+  return dir;
+}
+
+// Keyed by a hash of the full track path rather than the filename, so two
+// same-named files in different folders (or a file that gets renamed) don't
+// collide or return a stale entry.
+function lyricsCachePath(trackPath) {
+  const key = crypto.createHash('sha1').update(trackPath).digest('hex');
+  return path.join(getLyricsCacheDir(), key + '.json');
+}
+
+function readLyricsCache(trackPath) {
+  try {
+    return JSON.parse(fs.readFileSync(lyricsCachePath(trackPath), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeLyricsCache(trackPath, data) {
+  try {
+    fs.writeFileSync(lyricsCachePath(trackPath), JSON.stringify(data));
+  } catch {
+    // best-effort; a cache miss just means we hit the network again next time
+  }
+}
+
+// Best-effort split of a "Artist - Title.ext" filename, which is the most
+// common convention for downloaded mp3s. Anything else is treated as a
+// title-only query — LRCLIB's search endpoint still does reasonably well
+// with just the title.
+function parseArtistTitle(name) {
+  const base = name.replace(/\.[^.]+$/, '');
+  const dashSplit = base.split(/\s-\s/);
+  if (dashSplit.length >= 2) {
+    return { artist: dashSplit[0].trim(), title: dashSplit.slice(1).join(' - ').trim() };
+  }
+  return { artist: '', title: base.trim() };
+}
+
+async function queryLrclib(name, durationSec) {
+  const { artist, title } = parseArtistTitle(name);
+  const headers = { 'User-Agent': 'Ullim-Music-Player (personal desktop app, https://github.com/E2yeong/music-player-pro)' };
+
+  // /api/get wants an exact title/artist/duration match and returns the
+  // single best hit; try it first since it's the highest-confidence result.
+  try {
+    const params = new URLSearchParams({ track_name: title });
+    if (artist) params.set('artist_name', artist);
+    if (durationSec) params.set('duration', String(Math.round(durationSec)));
+    const res = await fetch(`https://lrclib.net/api/get?${params.toString()}`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && (data.syncedLyrics || data.plainLyrics)) return data;
+    }
+  } catch {
+    // fall through to fuzzy search
+  }
+
+  // Fuzzy fallback for filenames that don't line up exactly (missing
+  // artist, slightly different title, wrong duration tag, etc.).
+  try {
+    const params = new URLSearchParams({ track_name: title });
+    if (artist) params.set('artist_name', artist);
+    const res = await fetch(`https://lrclib.net/api/search?${params.toString()}`, { headers });
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length) {
+        return list.find((x) => x.syncedLyrics) || list[0];
+      }
+    }
+  } catch {
+    // give up quietly; the renderer shows a "가사를 찾을 수 없어요" state either way
+  }
+  return null;
 }
 
 function createWindow(startHidden) {
@@ -452,6 +553,45 @@ ipcMain.handle('load-settings', () => {
 
 ipcMain.on('save-settings', (_event, data) => {
   writeSettingsFile(data);
+});
+
+// ---------- IPC: lyrics ----------
+// Lookup order: a local .lrc next to the media file (highest trust, works
+// offline) -> the on-disk cache from a previous lookup -> LRCLIB over the
+// network. `synced` tells the renderer whether `lrc` is real LRC (timestamped,
+// line-by-line) text it should parse and scroll, vs. `plain` being untimed
+// lyrics it can only show as a static block.
+ipcMain.handle('fetch-lyrics', async (_event, payload) => {
+  const { path: trackPath, name, durationSec } = payload || {};
+  if (!trackPath || !name) return { source: 'none', synced: false, lrc: null, plain: null };
+
+  const local = findLocalLrc(trackPath);
+  if (local) return { source: 'local', synced: true, lrc: local, plain: null };
+
+  const cached = readLyricsCache(trackPath);
+  if (cached) {
+    if (cached.notFound) return { source: 'cache', synced: false, lrc: null, plain: null };
+    return {
+      source: 'cache',
+      synced: !!cached.syncedLyrics,
+      lrc: cached.syncedLyrics || null,
+      plain: cached.plainLyrics || null
+    };
+  }
+
+  const result = await queryLrclib(name, durationSec);
+  if (result && (result.syncedLyrics || result.plainLyrics)) {
+    writeLyricsCache(trackPath, { syncedLyrics: result.syncedLyrics || null, plainLyrics: result.plainLyrics || null });
+    return {
+      source: 'lrclib',
+      synced: !!result.syncedLyrics,
+      lrc: result.syncedLyrics || null,
+      plain: result.plainLyrics || null
+    };
+  }
+
+  writeLyricsCache(trackPath, { notFound: true });
+  return { source: 'none', synced: false, lrc: null, plain: null };
 });
 
 // ---------- IPC: splash window ----------

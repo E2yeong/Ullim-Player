@@ -19,6 +19,7 @@
     shuffle: false,
     eqEnabled: true,
     waveformEnabled: true,
+    lyricsEnabled: false,
     currentPreset: null, // EQ_PRESETS key, or null once the user hand-tweaks a slider
     trayOnClose: true,   // read directly by main.js's close handler via the settings file
     introEnabled: true,  // read directly by main.js before creating the splash window
@@ -48,6 +49,9 @@
   const btnClearList = document.getElementById('btnClearList');
   const btnEqToggle = document.getElementById('btnEqToggle');
   const btnWaveToggle = document.getElementById('btnWaveToggle');
+  const btnLyricsToggle = document.getElementById('btnLyricsToggle');
+  const lyricsViewEl = document.getElementById('lyricsView');
+  const lyricsScrollEl = document.getElementById('lyricsScroll');
   const presetLabelEl = document.getElementById('presetLabel');
 
   const appVersionEl = document.getElementById('appVersion');
@@ -57,6 +61,7 @@
   const toggleTray = document.getElementById('toggleTray');
   const toggleIntro = document.getElementById('toggleIntro');
   const toggleWave = document.getElementById('toggleWave');
+  const toggleLyrics = document.getElementById('toggleLyrics');
   const toggleAutoUpdate = document.getElementById('toggleAutoUpdate');
 
   const eqBandsEl = document.getElementById('eqBands');
@@ -441,6 +446,155 @@
     if (pages.main.classList.contains('active') && !coverArt.classList.contains('hidden')) resizeRippleCanvas();
   });
 
+  // ---------- Lyrics (LRCLIB + local .lrc) ----------
+  // The network/filesystem lookup itself runs in the main process (see
+  // main.js's 'fetch-lyrics' handler — the renderer's CSP can't reach an
+  // external host directly). This half just: parses LRC text into a
+  // sorted [{time, text}] list, tracks which line is "active" against
+  // mediaEl.currentTime, and renders/scrolls the overlay.
+  let currentLyrics = [];       // [{time, text}], synced case only
+  let lastActiveLyricsIndex = -1;
+  let lyricsLoadedPath = null;  // track path currentLyrics/lyricsView reflects, so a track change re-fetches
+  let lyricsRequestToken = 0;   // bumped on every new fetch so a slow stale response can't clobber a newer one
+
+  const LRC_TIME_TAG = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
+
+  function parseLRC(text) {
+    const lines = text.split(/\r?\n/);
+    const result = [];
+    for (const line of lines) {
+      LRC_TIME_TAG.lastIndex = 0;
+      const tags = [];
+      let m;
+      while ((m = LRC_TIME_TAG.exec(line))) tags.push(m);
+      if (!tags.length) continue; // metadata lines ([ar:...], [ti:...], etc.) have no time tag
+      const content = line.replace(LRC_TIME_TAG, '').trim();
+      if (!content) continue;
+      for (const t of tags) {
+        const min = parseInt(t[1], 10);
+        const sec = parseInt(t[2], 10);
+        const frac = t[3] ? parseInt(t[3].padEnd(3, '0').slice(0, 3), 10) : 0;
+        result.push({ time: min * 60 + sec + frac / 1000, text: content });
+      }
+    }
+    result.sort((a, b) => a.time - b.time);
+    return result;
+  }
+
+  // Renders currentLyrics as one <div class="lyrics-line"> per line. Called
+  // once per fetch (or state change) — the per-frame highlight update in
+  // updateActiveLyricsLine() just toggles .active on the existing divs
+  // rather than re-rendering.
+  function renderLyricsLines(message) {
+    lyricsScrollEl.innerHTML = '';
+    lastActiveLyricsIndex = -1;
+    if (!currentLyrics.length) {
+      const empty = document.createElement('div');
+      empty.className = 'lyrics-empty';
+      empty.textContent = message || '가사를 찾을 수 없어요';
+      lyricsScrollEl.appendChild(empty);
+      return;
+    }
+    currentLyrics.forEach((line) => {
+      const div = document.createElement('div');
+      div.className = 'lyrics-line';
+      div.textContent = line.text;
+      lyricsScrollEl.appendChild(div);
+    });
+  }
+
+  // Untimed lyrics (LRCLIB has no syncedLyrics for this track, only
+  // plainLyrics): shown as a single static block, no highlight/scroll.
+  function renderPlainLyrics(text) {
+    lyricsScrollEl.innerHTML = '';
+    lastActiveLyricsIndex = -1;
+    const pre = document.createElement('div');
+    pre.className = 'lyrics-plain';
+    pre.textContent = text;
+    lyricsScrollEl.appendChild(pre);
+  }
+
+  // Called from the timeupdate handler. Cheap when nothing changed (one
+  // comparison), so it's fine to call every tick even though it only does
+  // real DOM work when the active line actually advances.
+  function updateActiveLyricsLine() {
+    if (!state.lyricsEnabled || !currentLyrics.length) return;
+    const t = mediaEl.currentTime;
+    let idx = -1;
+    for (let i = 0; i < currentLyrics.length; i++) {
+      if (currentLyrics[i].time <= t) idx = i; else break;
+    }
+    if (idx === lastActiveLyricsIndex) return;
+    lastActiveLyricsIndex = idx;
+    const children = lyricsScrollEl.children;
+    for (let i = 0; i < children.length; i++) {
+      children[i].classList.toggle('active', i === idx);
+    }
+    if (idx >= 0 && children[idx]) {
+      children[idx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
+  async function loadLyricsForTrack(track) {
+    const token = ++lyricsRequestToken;
+    currentLyrics = [];
+    renderLyricsLines('가사를 불러오는 중...');
+    let result = null;
+    try {
+      result = await window.api.fetchLyrics({
+        path: track.path,
+        name: track.name,
+        durationSec: track.durationSec || mediaEl.duration || 0
+      });
+    } catch {
+      result = null;
+    }
+    if (token !== lyricsRequestToken) return; // a newer track/fetch has since started
+
+    if (result && result.synced && result.lrc) {
+      currentLyrics = parseLRC(result.lrc);
+    }
+    if (currentLyrics.length) {
+      renderLyricsLines();
+    } else if (result && result.plain) {
+      renderPlainLyrics(result.plain);
+    } else {
+      renderLyricsLines('가사를 찾을 수 없어요');
+    }
+  }
+
+  // Fetches (or re-shows already-fetched) lyrics for the current track, but
+  // only while the lyrics view is actually visible — so tracks are never
+  // looked up over the network just because they happened to play while the
+  // lyrics panel was off.
+  function ensureLyricsLoaded() {
+    if (!state.lyricsEnabled || state.currentIndex < 0) return;
+    const track = state.tracks[state.currentIndex];
+    if (lyricsLoadedPath === track.path) return;
+    lyricsLoadedPath = track.path;
+    loadLyricsForTrack(track);
+  }
+
+  function resetLyricsView() {
+    currentLyrics = [];
+    lastActiveLyricsIndex = -1;
+    lyricsLoadedPath = null;
+    lyricsRequestToken++; // invalidate any in-flight fetch for the old track
+    if (state.lyricsEnabled) renderLyricsLines();
+  }
+
+  function setLyricsEnabled(enabled) {
+    state.lyricsEnabled = enabled;
+    btnLyricsToggle.classList.toggle('off', !enabled);
+    lyricsViewEl.classList.toggle('hidden', !enabled);
+    setToggleUI(toggleLyrics, enabled);
+    if (enabled) ensureLyricsLoaded();
+    scheduleSave();
+  }
+
+  btnLyricsToggle.addEventListener('click', () => setLyricsEnabled(!state.lyricsEnabled));
+  toggleLyrics.addEventListener('click', () => setLyricsEnabled(!state.lyricsEnabled));
+
   // ---------- Playlist helpers ----------
   function extOf(p) {
     const m = /\.([a-zA-Z0-9]+)$/.exec(p);
@@ -539,6 +693,7 @@
       trackTitle.textContent = '재생할 파일을 선택하세요';
       trackSub.textContent = ' ';
       updateCoverVisibility(true);
+      resetLyricsView();
       broadcastState();
     } else if (wasCurrent) {
       const next = Math.min(i, state.tracks.length - 1);
@@ -558,6 +713,7 @@
     trackTitle.textContent = '재생할 파일을 선택하세요';
     trackSub.textContent = ' ';
     updateCoverVisibility(true);
+    resetLyricsView();
     renderPlaylist();
     setPlayIcon(false);
     broadcastState();
@@ -597,6 +753,8 @@
     trackSub.textContent = `트랙 ${index + 1} / ${state.tracks.length}`;
     updateCoverVisibility(true);
     renderPlaylist();
+    resetLyricsView();
+    ensureLyricsLoaded();
 
     initAudioGraph();
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -777,6 +935,7 @@
       shuffle: state.shuffle,
       eqEnabled: state.eqEnabled,
       waveformEnabled: state.waveformEnabled,
+      lyricsEnabled: state.lyricsEnabled,
       currentPreset: state.currentPreset,
       trayOnClose: state.trayOnClose,
       introEnabled: state.introEnabled,
@@ -828,6 +987,7 @@
         btnEqToggle.textContent = state.eqEnabled ? 'EQ ON' : 'EQ OFF';
       }
       setWaveformEnabled(typeof data.waveformEnabled === 'boolean' ? data.waveformEnabled : true);
+      setLyricsEnabled(typeof data.lyricsEnabled === 'boolean' ? data.lyricsEnabled : false);
       state.trayOnClose = data.trayOnClose !== false;
       setToggleUI(toggleTray, state.trayOnClose);
       state.introEnabled = data.introEnabled !== false;
@@ -1012,6 +1172,7 @@
       seekBar.value = String(pct);
       updateRangeFill(seekBar);
     }
+    updateActiveLyricsLine();
     const now = Date.now();
     if (now - lastOverlayBroadcast > 500) {
       lastOverlayBroadcast = now;

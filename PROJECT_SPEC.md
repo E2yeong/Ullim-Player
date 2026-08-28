@@ -302,6 +302,43 @@ UI 목업(Claude Design 캔버스, `Ullim app UI mockups/` 폴더 — 특히 `_d
     무력화 버그처럼, 속성은 맞게 바뀌어도 실제 화면에 그려지는 값(`getComputedStyle(el).display`)은
     다를 수 있다. 레이아웃/가시성 버그를 검증할 땐 반드시 computed style을 직접 확인할 것.
 
+### 4.13 가사(Lyrics) 기능 — LRCLIB + 로컬 `.lrc`, 노래방식 하이라이트/자동 스크롤
+
+- **트리거**: 스테이지 우상단 `.stage-toggles` 안, 파형 토글 버튼 옆에 있는 가사 토글 버튼
+  (`#btnLyricsToggle`, 가로선 3개 아이콘). 설정 페이지의 "가사 표시" 스위치(`#toggleLyrics`)와
+  상태를 공유하며, 둘 다 `setLyricsEnabled()` 하나로 수렴한다. 기본값은 꺼짐(다른 토글들과 달리
+  `waveformEnabled`처럼 기본 켜짐이 아님) — 업데이트 후 첫 실행에서 조용히 네트워크 요청이 나가는
+  것을 피하기 위함.
+- **조회 순서** (`main.js`의 `fetch-lyrics` IPC 핸들러, 렌더러가 아니라 메인 프로세스에서 실행):
+  1. 곡 파일과 같은 폴더에 같은 파일명의 `.lrc`가 있으면 그것을 최우선 사용 (오프라인에서도 동작,
+     사용자가 직접 편집/교정한 가사를 존중).
+  2. `userData/lyricsCache/<sha1(전체경로)>.json` 캐시 — 이전에 조회한 적 있으면 네트워크 요청 없이
+     즉시 반환. "찾을 수 없음"도 `{ notFound: true }`로 캐시해서 같은 곡을 열 때마다 매번 재조회하지
+     않는다.
+  3. [LRCLIB](https://lrclib.net) `/api/get` (파일명에서 `"Artist - Title.ext"` 패턴을 정규식으로 갈라
+     `artist_name`/`track_name`/`duration`으로 정확 매칭 시도) → 실패 시 `/api/search`로 퍼지 매칭
+     (아티스트/재생시간이 파일명과 안 맞거나 파일명에 아티스트가 없는 경우의 폴백).
+  4. 결과를 캐시에 쓰고 렌더러에 `{ source, synced, lrc, plain }` 형태로 반환.
+- **왜 메인 프로세스에서 조회하는가**: `index.html`의 CSP가 `default-src 'self'`라 렌더러는 외부
+  호스트에 직접 `fetch`할 수 없다. 캐시 파일 읽기/쓰기와 로컬 `.lrc` 탐색도 파일시스템 접근이라
+  어차피 메인 프로세스 쪽이 자연스럽다.
+- **LRC 파싱** (`renderer.js`의 `parseLRC()`): `[mm:ss.xx]` 형태의 타임태그를 정규식으로 뽑아 초 단위
+  타임스탬프로 변환, 한 줄에 태그가 여러 개(한 가사가 여러 타이밍에 반복되는 경우) 붙어 있는 것도
+  지원. `[ar:]`/`[ti:]` 같은 메타데이터 줄은 타임태그가 없으므로 자연스럽게 걸러진다.
+- **동기화 하이라이트/자동 스크롤**: `mediaEl`의 `timeupdate`마다 `updateActiveLyricsLine()`이
+  현재 재생 시각보다 작거나 같은 가장 마지막 줄을 찾아 `.active` 클래스를 옮기고
+  `scrollIntoView({ block: 'center', behavior: 'smooth' })`로 가운데 정렬한다 — 매 프레임 다시 그리는
+  게 아니라 이미 렌더된 줄 DOM에 클래스만 토글하므로 가볍다.
+- **동기화 안 된 가사(plainLyrics만 있는 경우)**: `renderPlainLyrics()`로 하이라이트/스크롤 없는
+  고정 텍스트 블록으로만 표시.
+- **레이아웃**: `#lyricsView`는 `.video-wrap` 안에서 비디오/커버아트/파형과 같은 자리에 겹치는 별도
+  오버레이 레이어(반투명 배경 + `backdrop-filter: blur`)다 — 커버아트-vs-파형 전환 로직과는
+  독립적이라, mp4 재생 중에도 영상 위에 가사를 얹어(노래방처럼) 볼 수 있다.
+- **트랙 전환 시 재조회**: `loadTrack()`이 `resetLyricsView()`(이전 곡 가사 즉시 비움 +
+  `lyricsRequestToken` 증가로 느리게 도착하는 이전 요청 결과 무시) → `ensureLyricsLoaded()`(가사
+  패널이 켜져 있을 때만, 그리고 이미 이 트랙 경로로 조회한 적 없을 때만 fetch)를 호출한다. 가사
+  패널이 꺼져 있으면 트랙이 바뀌어도 네트워크 요청이 전혀 나가지 않는다.
+
 ## 5. 프로세스 간 통신(IPC) 채널 요약
 
 | 채널 | 방향 | 용도 |
@@ -319,6 +356,7 @@ UI 목업(Claude Design 캔버스, `Ullim app UI mockups/` 폴더 — 특히 `_d
 | `load-settings` / `save-settings` | renderer↔main | 설정 파일 읽기/쓰기 |
 | `get-intro-video-url` | splash→main (invoke) | 인트로 영상의 `file://` URL 조회 |
 | `splash-done` | splash→main | 인트로 영상 종료/건너뛰기 → 스플래시 창 닫고 메인 창 표시 |
+| `fetch-lyrics` | renderer→main (invoke) | 로컬 `.lrc` → 캐시 → LRCLIB 순으로 가사 조회 (§4.13) |
 
 ## 6. 배포 절차 (재현용 명령어)
 
@@ -391,8 +429,19 @@ npx electron-builder --prepackaged "dist\win-unpacked" --win nsis
 
 ## 8. 향후 아이디어 (아직 미구현, 논의됨)
 
-- ID3 태그 읽기(제목/아티스트/앨범아트 표시) — `music-metadata` 같은 패키지 필요
-- 폴더 통째로 추가 (재귀적으로 오디오 파일 스캔)
+우선순위(사용자 확인, 2026-08-27경): **파형(구현 완료, §4.9) → 가사(구현 완료, §4.13) → 라이브러리 &
+메타데이터 관리(다음 차례)** → 오디오 엔진 고도화(IR 리버브/크로스페이드) → UI 다이나믹 컬러 테마.
+
+- **라이브러리 & 메타데이터 관리 (다음 작업 대상)**
+  - ID3 태그 읽기(제목/아티스트/앨범아트 표시, 가사 조회의 artist/title 정확도도 같이 올라감) —
+    `music-metadata` 같은 패키지 필요
+  - ID3 태그 편집기
+  - 여러 개의 플레이리스트 관리 (지금은 단일 재생목록뿐)
+  - 재생목록 실시간 검색/필터
+  - 폴더 통째로 추가 (재귀적으로 오디오 파일 스캔)
+- **오디오 엔진 고도화**: 지금 컨볼버는 절차적으로 생성한 노이즈 임펄스 응답(`buildImpulseResponse`)
+  — 실제 IR 샘플 기반 리버브로 교체, 트랙 전환 시 스마트 크로스페이드
+- **UI/UX**: 앨범아트 기반 다이나믹 컬러 테마, 오버레이/작업표시줄 모드 토글
 - 미디어 키(키보드/이어폰 재생 버튼) 지원 — Electron `globalShortcut` 또는 `MediaSession` API
 - Windows 작업표시줄 썸네일 툴바 버튼 (`BrowserWindow.setThumbarButtons`)
 - 리버브 wet 게인을 % 옆에 dB로도 보조 표시 (사용자 의견 교환만 하고 미적용 상태)

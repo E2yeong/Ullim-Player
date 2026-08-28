@@ -18,5 +18,7 @@ contextBridge.exposeInMainWorld('api', {
   onUpdateStatus: (callback) => ipcRenderer.on('update-status', (_event, payload) => callback(payload)),
 
   loadSettings: () => ipcRenderer.invoke('load-settings'),
-  saveSettings: (data) => ipcRenderer.send('save-settings', data)
+  saveSettings: (data) => ipcRenderer.send('save-settings', data),
+
+  fetchLyrics: (payload) => ipcRenderer.invoke('fetch-lyrics', payload)
 });

@@ -56,9 +56,17 @@
               <canvas id="rippleCanvas" class="ripple-canvas"></canvas>
               <div class="cover-note">♪</div>
             </div>
-            <button id="btnWaveToggle" class="wave-toggle" title="파형 애니메이션 켜기/끄기">
-              <svg viewBox="0 0 22 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="10" x2="3" y2="14"/><line x1="7" y1="6" x2="7" y2="18"/><line x1="11" y1="3" x2="11" y2="21"/><line x1="15" y1="7" x2="15" y2="17"/><line x1="19" y1="10" x2="19" y2="14"/></svg>
-            </button>
+            <div id="lyricsView" class="lyrics-view hidden">
+              <div class="lyrics-scroll" id="lyricsScroll"></div>
+            </div>
+            <div class="stage-toggles">
+              <button id="btnLyricsToggle" class="wave-toggle off" title="가사 보기/숨기기">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>
+              </button>
+              <button id="btnWaveToggle" class="wave-toggle" title="파형 애니메이션 켜기/끄기">
+                <svg viewBox="0 0 22 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="10" x2="3" y2="14"/><line x1="7" y1="6" x2="7" y2="18"/><line x1="11" y1="3" x2="11" y2="21"/><line x1="15" y1="7" x2="15" y2="17"/><line x1="19" y1="10" x2="19" y2="14"/></svg>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -143,6 +151,13 @@
               <div class="setting-desc">재생 화면에 오디오 반응형 파형을 그립니다. mp4 영상을 볼 때는 자동으로 꺼집니다.</div>
             </div>
             <button id="toggleWave" class="toggle-switch on"><span class="knob"></span></button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-label">가사 표시</div>
+              <div class="setting-desc">재생 화면에 동기화된 가사를 보여줍니다. 곡 파일 옆의 .lrc를 먼저 찾고, 없으면 LRCLIB에서 가져옵니다.</div>
+            </div>
+            <button id="toggleLyrics" class="toggle-switch"><span class="knob"></span></button>
           </div>
           <div class="setting-row">
             <div class="setting-text">

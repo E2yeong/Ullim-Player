@@ -260,10 +260,15 @@ input[type="range"]::-webkit-slider-runnable-track {
   align-items: center;
   justify-content: center;
 }
-.wave-toggle {
+.stage-toggles {
   position: absolute;
   top: 12px;
   right: 12px;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+}
+.wave-toggle {
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -274,7 +279,6 @@ input[type="range"]::-webkit-slider-runnable-track {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2;
 }
 .wave-toggle svg { width: 16px; height: 15px; }
 .wave-toggle:hover { border-color: var(--color-accent); color: var(--color-text); }
@@ -309,6 +313,68 @@ input[type="range"]::-webkit-slider-runnable-track {
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+/* ---------- Lyrics overlay ----------
+   Sits above the video/cover/waveform (whatever the stage is currently
+   showing) as its own translucent layer, independent of the cover-art vs.
+   waveform choice — so lyrics can be read over an mp4's own picture too,
+   karaoke-style, not just over the cover/waveform view. */
+.lyrics-view {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  background: color-mix(in srgb, var(--color-bg) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+.lyrics-view.hidden { display: none; }
+
+.lyrics-scroll {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 45% 12% 45%;
+  mask-image: linear-gradient(to bottom, transparent, black 16%, black 84%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 16%, black 84%, transparent);
+}
+.lyrics-scroll::-webkit-scrollbar { display: none; }
+
+.lyrics-line {
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: center;
+  max-width: 100%;
+  color: color-mix(in srgb, var(--color-text) 38%, transparent);
+  transition: color 0.25s ease, font-size 0.25s ease;
+}
+.lyrics-line.active {
+  color: var(--color-text);
+  font-size: 19px;
+  font-weight: 600;
+  text-shadow: 0 0 20px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+.lyrics-plain {
+  margin: auto;
+  padding: 24px 12%;
+  white-space: pre-line;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.9;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+
+.lyrics-empty {
+  margin: auto;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+  text-align: center;
 }
 
 .now-playing { text-align: center; margin-bottom: var(--space-3); flex: none; }
