@@ -1,9 +1,27 @@
+/* Same Nocturne tokens as src/renderer/style.css (see PROJECT_SPEC.md,
+   section 4.12) -- duplicated here because this is a separate document/
+   window and can't share CSS custom properties with the main window.
+   Caution: CSS comments cannot contain the two characters that close a
+   comment anywhere inside them, even mid-word -- an earlier version of the
+   main stylesheet learned this the hard way. */
+:root {
+  --color-bg: #161826;
+  --color-surface: #232532;
+  --color-text: #e9e9ed;
+  --color-accent: #9184d9;
+  --color-divider: rgba(233, 233, 237, 0.16);
+  --color-neutral-900: #292b31;
+  --color-accent-200: #e7e5fe;
+  --color-accent-700: #5d5294;
+}
+
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0;
   width: 100%; height: 100%;
   background: transparent;
-  font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+  font-family: "Inter", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+  color: var(--color-text);
   overflow: hidden;
   user-select: none;
 }
@@ -11,8 +29,8 @@ html, body {
 .panel {
   position: relative;
   width: 100%; height: 100%;
-  background: rgba(20, 20, 26, 0.92);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: color-mix(in srgb, var(--color-bg) 92%, transparent);
+  border: 1px solid var(--color-divider);
   border-radius: 14px;
   padding: 10px 12px 12px;
   display: flex;
@@ -43,7 +61,7 @@ html, body {
 .dot {
   width: 8px; height: 8px;
   border-radius: 50%;
-  background: #6c5ce7;
+  background: var(--color-accent);
   flex-shrink: 0;
   transform: scale(1);
   transition: transform 0.12s ease-out, box-shadow 0.12s ease-out;
@@ -52,7 +70,7 @@ html, body {
 .title {
   flex: 1;
   font-size: 12.5px;
-  color: #e6e7f0;
+  color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -62,13 +80,16 @@ html, body {
   -webkit-app-region: no-drag;
   background: transparent;
   border: none;
-  color: #9294a8;
-  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 3px;
   border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.close-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.close-btn svg { width: 12px; height: 12px; }
+.close-btn:hover { background: color-mix(in srgb, var(--color-text) 8%, transparent); color: var(--color-text); }
 
 .progress-row {
   -webkit-app-region: no-drag;
@@ -78,7 +99,7 @@ html, body {
 }
 .ptime {
   font-size: 10px;
-  color: #9294a8;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
   width: 30px;
   flex-shrink: 0;
   text-align: center;
@@ -92,19 +113,25 @@ html, body {
 }
 
 .ov-btn {
-  background: #24242f;
-  border: 1px solid #34344a;
-  color: #dcdde8;
-  width: 34px; height: 34px;
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  color: var(--color-text);
+  width: 32px; height: 32px;
   border-radius: 50%;
-  font-size: 13px;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
-.ov-btn:hover { border-color: #6c5ce7; color: #fff; }
-.ov-btn.play { width: 40px; height: 40px; font-size: 15px; background: #6c5ce7; border-color: #6c5ce7; }
-.ov-btn.play:hover { background: #7d70ea; }
+.ov-btn svg { width: 13px; height: 13px; }
+.ov-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.ov-btn.play {
+  width: 38px; height: 38px;
+  color: #14141c;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.ov-btn.play svg { width: 15px; height: 15px; }
+.ov-btn.play:hover { background: var(--color-accent-200); border-color: var(--color-accent-200); }
 
 .volume {
   flex: 1;
@@ -112,8 +139,9 @@ html, body {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
-.vicon { font-size: 12px; flex-shrink: 0; }
+.vicon { width: 13px; height: 13px; flex-shrink: 0; }
 
 input[type="range"] {
   -webkit-appearance: none;
@@ -121,21 +149,21 @@ input[type="range"] {
   width: 100%;
   height: 4px;
   border-radius: 3px;
-  background: #2c2c3a;
+  background: var(--color-neutral-900);
   cursor: pointer;
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 12px; height: 12px;
   border-radius: 50%;
-  background: #6c5ce7;
+  background: var(--color-accent);
   cursor: pointer;
   margin-top: -4px;
 }
 input[type="range"]::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 3px;
-  background: linear-gradient(90deg, #6c5ce7 var(--fill, 80%), #2c2c3a 0);
+  background: linear-gradient(90deg, var(--color-accent) var(--fill, 80%), var(--color-neutral-900) 0);
 }
 
 .eq-mini {
@@ -146,7 +174,7 @@ input[type="range"]::-webkit-slider-runnable-track {
   flex: 1;
   min-height: 0;
   padding-top: 8px;
-  border-top: 1px solid rgba(255,255,255,0.08);
+  border-top: 1px solid var(--color-divider);
 }
 .panel.expanded .eq-mini { display: flex; }
 
@@ -167,29 +195,63 @@ input[type="range"]::-webkit-slider-runnable-track {
 }
 .eq-mini-band .eq-mini-freq {
   font-size: 8.5px;
-  color: #7c7e92;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
 }
-.eq-mini-band input[type="range"] {
-  -webkit-appearance: slider-vertical;
-  appearance: slider-vertical;
-  width: 5px;
+
+/* Same hand-drawn slider as the main window's .eq-slider-* (see the note in
+   src/renderer/style.css) -- a real, invisible <input type="range"> handles
+   interaction; the visible track/fill/thumb are plain divs we position
+   ourselves in setMiniEqVisual() below, so they always use our own solid
+   colors and stay identical to the main window's EQ regardless of what's
+   behind this semi-transparent overlay window. */
+.eq-mini-slider-wrap {
+  position: relative;
   flex: 1;
   min-height: 24px;
-  background: #2c2c3a;
-  border-radius: 3px;
-  padding: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
-.eq-mini-band input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 13px; height: 8px;
-  border-radius: 2px;
-  background: #6c5ce7;
-  cursor: pointer;
-}
-.eq-mini-band input[type="range"]::-webkit-slider-runnable-track {
+.eq-mini-track {
+  position: relative;
   width: 5px;
-  background: #2c2c3a;
+  height: 100%;
   border-radius: 3px;
+  background: var(--color-neutral-900);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+.eq-mini-fill {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  border-radius: 3px;
+  background: var(--color-accent);
+}
+.eq-mini-thumb {
+  position: absolute;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 65%, transparent);
+  transform: translate(-50%, 50%);
+  pointer-events: none;
+}
+.eq-mini-band input[type="range"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .eq-mini-reverb {

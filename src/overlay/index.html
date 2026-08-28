@@ -11,7 +11,9 @@
   <div class="drag-bar">
     <span class="dot"></span>
     <div class="title" id="title">재생 중인 곡 없음</div>
-    <button id="btnClose" class="close-btn" title="오버레이 닫기">✕</button>
+    <button id="btnClose" class="close-btn" title="오버레이 닫기">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>
+    </button>
   </div>
 
   <div class="progress-row">
@@ -21,11 +23,17 @@
   </div>
 
   <div class="row">
-    <button id="btnPrev" class="ov-btn" title="이전 곡">⏮</button>
-    <button id="btnPlay" class="ov-btn play" title="재생/일시정지">▶</button>
-    <button id="btnNext" class="ov-btn" title="다음 곡">⏭</button>
+    <button id="btnPrev" class="ov-btn" title="이전 곡">
+      <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="19 20 9 12 19 4 19 20"/><rect x="4.5" y="4" width="2.2" height="16" rx="0.8"/></svg>
+    </button>
+    <button id="btnPlay" class="ov-btn play" title="재생/일시정지">
+      <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+    </button>
+    <button id="btnNext" class="ov-btn" title="다음 곡">
+      <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 4 15 12 5 20 5 4"/><rect x="17.3" y="4" width="2.2" height="16" rx="0.8"/></svg>
+    </button>
     <div class="volume">
-      <span class="vicon">🔊</span>
+      <svg class="vicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 9 3 15 8 15 13 20 13 4 8 9 3 9" fill="currentColor" stroke="none"/><path d="M17 8a5 5 0 0 1 0 8"/></svg>
       <input type="range" id="volume" min="0" max="100" value="80" />
     </div>
   </div>

@@ -10,9 +10,9 @@
 
 ## 1. 한 줄 요약
 
-로컬 mp3/mp4 파일을 재생하는 Windows 데스크톱 앱(Electron). 플레이리스트, 반복/셔플, 8밴드 그래픽 EQ,
-리버브, 항상 위에 뜨는 미니 플레이어(오버레이), 시스템 트레이 백그라운드 재생, 설정 자동 저장/복원,
-GitHub Releases 기반 자동 업데이트를 갖춤.
+로컬 mp3/mp4 파일을 재생하는 Windows 데스크톱 앱(Electron). 좌측 아이콘 레일 + 탭(목록/재생/EQ/설정)
+구조의 메인 창, 플레이리스트, 반복/셔플, 8밴드 그래픽 EQ, 리버브, 항상 위에 뜨는 미니 플레이어(오버레이),
+시스템 트레이 백그라운드 재생, 설정 자동 저장/복원, GitHub Releases 기반 자동 업데이트를 갖춤.
 
 ## 2. 기술 스택
 
@@ -39,9 +39,9 @@ Music_pro/                # 로컬 프로젝트 폴더명(디스크상 이름). 
     preload-overlay.js      # 오버레이 창용 contextBridge API (window.overlayApi)
     preload-splash.js       # 인트로 영상 창용 contextBridge API (window.splashApi)
     renderer/
-      index.html
+      index.html            # 좌측 아이콘 레일 + 4개 탭(목록/재생/EQ/설정) + 하단 고정 트랜스포트 바
       style.css
-      renderer.js          # 메인 창 전체 로직 (재생, 플레이리스트, EQ, 설정 저장/복원, 업데이트 UI)
+      renderer.js          # 메인 창 전체 로직 (탭 전환, 재생, 플레이리스트, EQ, 설정 저장/복원, 업데이트 UI)
     overlay/
       index.html
       overlay.css
@@ -58,6 +58,13 @@ Music_pro/                # 로컬 프로젝트 폴더명(디스크상 이름). 
   씌워 검은 화면 대신 보여줌 (`videoWidth === 0`이면 오디오로 간주).
 - 파일 경로는 `file:///...` 로 변환해 `mediaEl.src`에 대입 (공백/한글 등은 `encodeURI` 처리).
 - 이전/다음/반복(끄기→전체→한곡 순환)/셔플, 재생목록 클릭 재생, 개별 삭제, 전체 삭제, 드래그 앤 드롭 추가.
+- 좌측 사이드바에 여유 있는 밀도의 리스트(번호 / 제목 / 길이)로 표시 (§4.12 "정석안" 참고 — 한때 검색창
+  달린 촘촘한 표 형태였다가, "여유 있는 밀도"로 되돌림).
+- 길이(재생시간)는 파일을 재생하지 않고도 표시하기 위해, 트랙이 추가될 때마다 화면에 붙이지 않는
+  `<video preload="metadata">`를 하나 만들어 `loadedmetadata`에서 duration만 읽고 버리는 방식으로
+  비동기 조회함 (`probeDuration()`). DOM에 붙이지 않는 엘리먼트라 GC가 로딩 중에 수거해갈 수 있어,
+  로딩이 끝날 때까지 `Set`에 참조를 붙잡아둠. 조회된 `durationSec`은 `state.tracks`의 트랙 객체에 그대로
+  얹혀서 설정 파일에도 같이 저장되므로, 한 번 조회된 곡은 다음 실행부터 다시 조회하지 않음.
 
 ### 4.2 EQ / 리버브 (Web Audio 그래프)
 신호 경로:
@@ -87,7 +94,10 @@ MediaElementSource
 - 진행바 포함 (탐색 가능): 메인 창이 재생 중 500ms 간격으로 `currentTime/duration`을 브로드캐스트.
 
 ### 4.4 시스템 트레이 (백그라운드 재생)
-- 창의 X(닫기) 버튼을 누르면 **종료가 아니라 숨김**(`e.preventDefault(); mainWindow.hide()`).
+- 창의 X(닫기) 버튼을 누르면 기본적으로 **종료가 아니라 숨김**(`e.preventDefault(); mainWindow.hide()`).
+  이 동작은 "설정" 탭의 "닫아도 트레이에 상주" 토글로 끌 수 있음 — 꺼져 있으면 `close` 이벤트에서
+  `preventDefault()`를 호출하지 않아 평범하게 종료됨. 매번 닫을 때마다 `readSettingsFile()`을 새로 읽어
+  판단하므로 앱을 재시작하지 않고 설정만 바꿔도 바로 반영됨.
 - 실제 종료는 트레이 메뉴의 "종료"(`app.isQuitting = true; app.quit()`)나 `before-quit` 이벤트를 통해서만.
 - 트레이 메뉴: 열기 / 재생·일시정지 / 다음 곡 / 이전 곡 / 종료. 트레이 아이콘 클릭 시 창 show/focus.
 - 창이 숨겨져 있어도 렌더러 프로세스는 계속 살아있으므로 재생은 백그라운드에서 계속되고, 오버레이로
@@ -95,8 +105,14 @@ MediaElementSource
 
 ### 4.5 설정 자동 저장/복원
 - 저장 위치: `app.getPath('userData')/player-settings.json` (Windows: `%APPDATA%\<productName 소문자>\`)
-- 저장 항목: `tracks`(경로+이름 배열), `currentIndex`, `repeatMode`, `shuffle`, `eqEnabled`,
-  `waveformEnabled`, `volume`, `eq: { bands: number[8], reverb: number }`, `overlayBounds`.
+- 저장 항목: `tracks`(경로+이름+`durationSec` 배열), `currentIndex`, `repeatMode`, `shuffle`, `eqEnabled`,
+  `waveformEnabled`, `currentPreset`(마지막으로 적용한 EQ 프리셋 key, 수동으로 슬라이더를 만지면 `null`),
+  `trayOnClose`/`introEnabled`/`autoUpdateCheck`(§4.12 설정 탭 토글 3종), `volume`,
+  `eq: { bands: number[8], reverb: number }`, `overlayBounds`.
+- `trayOnClose`/`introEnabled`/`autoUpdateCheck`는 렌더러 쪽에는 UI 상태 표시 말고 다른 효과가 없고,
+  **메인 프로세스(`main.js`)가 설정 파일을 직접 읽어** 동작을 바꾼다 — 별도 IPC 채널을 두지 않고, 그때그때
+  `readSettingsFile()`을 호출해 최신 값을 읽는 방식 (창 닫기 핸들러, 스플래시 창 생성 직전, 앱 시작 시
+  각각 한 번씩).
 - **읽기-수정-쓰기(read-modify-write) 병합** 방식 (`writeSettingsFile`) — 렌더러가 부분 정보만 저장해도
   메인 프로세스가 직접 저장하는 `overlayBounds` 같은 필드를 덮어쓰지 않도록 항상 기존 파일을 읽어 병합
   후 저장.
@@ -125,8 +141,15 @@ MediaElementSource
 - **업데이트 확인 흐름**: 메인 창의 "업데이트 확인" 버튼 → `checkForUpdates()` → available이면 버튼이
   "vX.X.X 다운로드"로 바뀜 → 클릭 시 `downloadUpdate()` → 완료되면 "재시작 후 설치" → `quitAndInstall()`.
   개발 모드(`app.isPackaged === false`)에서는 업데이트 확인을 하지 않고 안내 메시지만 표시.
+- **시작 시 자동(조용한) 확인**: "설정" 탭의 "자동 업데이트 확인" 토글이 켜져 있으면(기본값), 패키징된
+  앱은 `app.whenReady()` 직후 `autoUpdater.checkForUpdates()`를 한 번 더 호출한다. 수동 버튼과 완전히
+  같은 `autoUpdater` 이벤트(`checking-for-update`/`update-available`/...)를 그대로 타므로 렌더러 쪽에는
+  새 IPC나 분기 없이 동일하게 반영됨 — "자동으로 조용히 확인"이라는 문구와 달리 실제로는 수동 확인과
+  똑같이 상태 UI가 갱신되는데, 새 버전이 없으면 어차피 "최신 버전입니다" 정도라 눈에 띄지 않을 뿐임.
 
 ### 4.7 실행 시 인트로 영상
+- "설정" 탭의 "시작할 때 인트로 영상" 토글이 꺼져 있으면 `createSplashWindow()`가 스플래시 창을 아예
+  만들지 않고 곧바로 `onDone()`을 호출해 메인 창을 보여줌 — 인트로 관련 코드 경로 자체를 건너뜀.
 - 앱이 콜드 스타트할 때(트레이에서 창을 다시 열 때는 X) `assets/Ullim_intro.mp4`를 재생하는 별도의
   frameless 스플래시 창을 먼저 띄움. 메인 창은 `show:false`로 미리 생성해두고, 영상이 끝나거나
   ("ended"/"error" 이벤트) 사용자가 "건너뛰기"를 누르면 스플래시 창을 닫고 메인 창을 보여줌.
@@ -190,6 +213,69 @@ MediaElementSource
 - 트레이 아이콘은 `build/icon.ico`(멀티 사이즈)를 런타임에 리사이즈하지 않고, 미리 32×32로 렌더링해둔
   `build/tray-icon.png`를 그대로 사용 — 멀티 프레임 `.ico`에서 프레임을 골라 리사이즈하는 것보다 훨씬
   예측 가능함.
+
+### 4.12 UI 레이아웃 재설계 — "정석안"(1a) + 설정만 분리하는 레일(1b) + Nocturne 디자인 토큰
+UI 목업(Claude Design 캔버스, `Ullim app UI mockups/` 폴더 — 특히 `_ds/nocturne-*/styles.css`가
+실제 디자인 시스템 소스)을 검토하고 처음엔 "레일 + 4개 탭(목록/재생/EQ/설정)"으로 전부 분리했었는데,
+사용자 피드백("한 화면에 다 있고 여유 있는 밀도였으면 좋겠다")을 받고 최종적으로는 **목업의 1a
+안(좌: 재생목록 / 우: 스테이지+EQ, 전부 한 화면)을 기본 레이아웃으로 유지하면서, 레일은 "설정" 화면
+하나만 분리해서 꺼내는 용도로만 쓰는** 형태로 정리했다.
+
+- **구조**: `.app` = `.rail`(좌측 아이콘 60px) + `.pages`(나머지 전체). `.pages` 안에 `#pageMain`(기본,
+  1a 그대로: 사이드바 재생목록 + 스테이지/파형 + 탐색바 + 재생 컨트롤 + EQ 패널이 전부 한 화면)과
+  `#pageSettings`(§4.5의 토글 4개 + 버전/업데이트 확인) 두 개만 존재. 레일 버튼은 `data-page` 속성이
+  있는 것만 페이지 전환 대상이고(홈/설정), 오버레이 핀 버튼은 `data-page`가 없어서 전환 로직에서
+  자동으로 제외됨.
+- **페이지 전환은 클래스로, `hidden` 속성은 쓰지 않음**: `.page { display:none } .page.active
+  { display:flex }` 처럼 클래스 기반으로 전환한다. 첫 시도 때는 `hidden` 속성 + `.tab-view{display:flex}`
+  조합을 썼다가 실제로 화면에 4개가 전부 겹쳐 보이는 버그가 났었다 — **원인은 `[hidden]{display:none}`이
+  브라우저 기본(user-agent) 스타일시트 규칙이라, author 스타일시트의 `.tab-view{display:flex}`가
+  명시도(specificity)와 무관하게 항상 그것보다 우선 적용되기 때문**이었다. 클래스 기반 토글은 이 origin
+  우선순위 문제 자체가 없어서 재발 위험이 없다.
+- **Nocturne 디자인 토큰**: `src/renderer/style.css`와 `src/overlay/overlay.css` 양쪽 다 `:root`에
+  같은 토큰을 하드코딩해서 갖고 있음 (두 창은 별도 문서라 CSS 커스텀 프로퍼티를 공유할 수 없음) —
+  `--color-bg:#161826`, `--color-surface:#232532`, `--color-text:#e9e9ed`, `--color-accent:#9184d9`
+  등. 구글 폰트(Inter)는 이 앱의 CSP(`style-src 'self' 'unsafe-inline'`, 외부 origin 예외 없음)로는
+  로드할 수 없어서 `"Inter", "Segoe UI", ...` 폴백 스택으로 근사함. 버튼도 목업의 `.btn`/`.btn-primary`
+  등 컴포넌트 클래스를 그대로 이식 — 꽉 찬 배경색 버튼이 아니라 테두리만 있다가 hover 시 액센트 컬러가
+  옅게 깔리는 outline 스타일.
+- **아이콘은 이모지가 아니라 인라인 SVG**: 재생/일시정지/이전/다음/셔플/반복/볼륨/홈/설정/핀/닫기 전부
+  얇은 선(stroke) 또는 단색 채움 SVG로 통일 (main.js가 아니라 각 window의 index.html/renderer.js에
+  하드코딩된 마크업 — 아이콘 폰트 CDN은 CSP상 불러올 수 없어서 직접 그림). 재생/일시정지처럼 상태에 따라
+  바뀌는 아이콘은 `PLAY_ICON`/`PAUSE_ICON` 문자열을 버튼의 `innerHTML`에 갈아끼우는 방식
+  (`setPlayIcon()` in renderer.js, 오버레이는 overlay.js에 동일 패턴 복붙).
+- **CSS 주석 안에 `*/` 를 절대 넣지 말 것 (실제로 겪은 버그)**: `style.css` 맨 위 설명 주석에 목업 파일
+  경로(`nocturne-*/styles.css`)를 그대로 적었다가, 그 안의 `*/`가 주석을 조기 종료시켜 `:root{...}`
+  색상 변수 블록 전체가 파서에 의해 통째로 버려지는 사고가 있었다. 결과: 텍스트는 전부 브라우저 기본값인
+  검은색으로, 배경만 `BrowserWindow`의 네이티브 `backgroundColor` 옵션(CSS와 무관) 때문에 어두운 색으로
+  남아 "글씨가 안 보인다"는 증상으로 나타났다. `document.styleSheets[0].cssRules`에서 `:root` 규칙이
+  통째로 빠져 있는지 확인하면 이 클래스의 버그를 바로 잡아낼 수 있다. 재현 시 CSS 파일 안에 아무 텍스트나
+  자유롭게 쓰지 말고, 특히 파일 경로/글롭 패턴처럼 `*`와 `/`가 인접할 수 있는 문구는 주석에서 피할 것.
+- **EQ 슬라이더는 네이티브 `<input type="range">` 스타일링을 포기하고 직접 그림**: 처음엔
+  `-webkit-appearance: slider-vertical`을 썼다가 네이티브 동그란 손잡이가 커스텀 손잡이 아래에 겹쳐
+  보이는 버그가 있었고, 다음엔 `writing-mode: vertical-lr` + `accent-color`(네이티브 테마 위임)로
+  바꿨더니 이번엔 트랙 길이가 짧은 오버레이 미니 EQ에서 네이티브 손잡이(고정 크기 원)가 트랙에 비해
+  과하게 커 보이는 문제, 그리고 오버레이가 반투명 창이라 다른 배경(흰 화면 등) 위에서는 트랙 자체가 잘
+  안 보이는 문제가 있었다. 최종적으로는 **진짜 `<input type="range">`는 `opacity:0`으로 완전히
+  투명하게 유지해서 드래그/키보드 인터랙션만 담당**시키고, 그 위에 `.eq-slider-track`(고정 색 트랙) +
+  `.eq-slider-fill`(0dB 기준선에서 채워지는 막대) + `.eq-slider-thumb`(원형 손잡이) 세 개의 일반
+  `<div>`를 겹쳐서 시각적으로 그리는 방식으로 바꿨다. 값이 바뀔 때마다 `setEqVisual(index, value)`
+  (오버레이는 `setMiniEqVisual`)이 손잡이 위치(`bottom: pct%`)와 채움 막대의 시작/끝(0dB 지점과 현재
+  값 지점 중 작은 쪽/큰 쪽)을 인라인 스타일로 계산해 넣는다 — 리버브 슬라이더처럼 "밑에서부터 차는" 게
+  아니라 **0dB 중앙 기준선에서 위/아래로 차는** 방식(부스트는 위로, 컷은 아래로)이라 진짜 EQ 하드웨어/
+  소프트웨어와 비슷하게 읽힌다. 두 창 모두 손으로 그리는 색이 항상 우리가 지정한 고유 색이라, 오버레이가
+  어떤 배경 위에 떠 있든 안 보이는 문제가 재발하지 않는다. `applyEqBand()`(main)와 프리셋 클릭/원격
+  커맨드/설정 복원 등 EQ 값이 바뀌는 모든 경로가 전부 이 함수를 거치므로 시각 요소가 어긋날 일이 없다.
+- **CDP 자동화 테스트 시 주의**:
+  - `Runtime.evaluate`의 `expression`은 페이지의 실제 전역 스코프에서 평가되므로, 서로 다른 `evaluate`
+    호출에서 같은 이름으로 `const`/`let`을 반복 선언하면 "Identifier has already been declared" 에러가
+    난다 — 매번 `(function(){ ... })()`로 감싸서 로컬 스코프를 만들 것.
+  - 렌더러가 `window.api.saveSettings(...)`를 외부에서 직접 호출해 설정 파일에 트랙을 주입해도, 그 후
+    `Page.reload`를 하면 `beforeunload` 핸들러가 (여전히 비어 있는) 실제 렌더러 상태로 파일을 덮어써
+    버린다 — 이 경로로 테스트하려면 `Page.reload` 대신 프로세스를 완전히 종료/재시작해야 한다.
+  - `element.hidden`(IDL 속성)이 올바르게 토글되는지만 확인하는 건 충분하지 않다 — 위의 `[hidden]`
+    무력화 버그처럼, 속성은 맞게 바뀌어도 실제 화면에 그려지는 값(`getComputedStyle(el).display`)은
+    다를 수 있다. 레이아웃/가시성 버그를 검증할 땐 반드시 computed style을 직접 확인할 것.
 
 ## 5. 프로세스 간 통신(IPC) 채널 요약
 

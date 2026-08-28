@@ -25,6 +25,10 @@
   const EQ_MIN = -36;
   const EQ_MAX = 36;
 
+  // Same icon markup as the main window's PLAY_ICON/PAUSE_ICON (src/renderer/renderer.js).
+  const PLAY_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+  const PAUSE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+
   // While the user is actively dragging a slider, incoming onState() updates
   // for that control are skipped so they don't fight the drag and make the
   // thumb jump around mid-gesture.
@@ -34,9 +38,23 @@
   let lastDuration = 0;
 
   const miniSliders = [];
+  const miniFillEls = [];
+  const miniThumbEls = [];
   EQ_BAND_LABELS.forEach((label, i) => {
     const wrap = document.createElement('div');
     wrap.className = 'eq-mini-band';
+
+    const sliderWrap = document.createElement('div');
+    sliderWrap.className = 'eq-mini-slider-wrap';
+
+    const track = document.createElement('div');
+    track.className = 'eq-mini-track';
+
+    const fill = document.createElement('div');
+    fill.className = 'eq-mini-fill';
+
+    const thumb = document.createElement('div');
+    thumb.className = 'eq-mini-thumb';
 
     const input = document.createElement('input');
     input.type = 'range';
@@ -45,21 +63,42 @@
     input.step = '1';
     input.value = '0';
 
+    track.appendChild(fill);
+    track.appendChild(thumb);
+    sliderWrap.appendChild(track);
+    sliderWrap.appendChild(input);
+
     const freq = document.createElement('span');
     freq.className = 'eq-mini-freq';
     freq.textContent = label;
 
-    wrap.appendChild(input);
+    wrap.appendChild(sliderWrap);
     wrap.appendChild(freq);
     eqMiniBandsEl.appendChild(wrap);
     miniSliders.push(input);
+    miniFillEls.push(fill);
+    miniThumbEls.push(thumb);
 
     input.addEventListener('mousedown', () => { eqDragging = true; });
     input.addEventListener('mouseup', () => { eqDragging = false; });
     input.addEventListener('input', () => {
+      setMiniEqVisual(i, Number(input.value));
       window.overlayApi.sendCommand({ type: 'eq-band', index: i, value: Number(input.value) });
     });
   });
+
+  // Same center-anchored fill as the main window's setEqVisual() —
+  // src/renderer/renderer.js — so a boost grows the bar up from 0dB and a
+  // cut grows it down.
+  function setMiniEqVisual(index, value) {
+    const pct = ((value - EQ_MIN) / (EQ_MAX - EQ_MIN)) * 100;
+    const centerPct = ((0 - EQ_MIN) / (EQ_MAX - EQ_MIN)) * 100;
+    const lo = Math.min(pct, centerPct);
+    const hi = Math.max(pct, centerPct);
+    miniFillEls[index].style.bottom = lo + '%';
+    miniFillEls[index].style.height = (hi - lo) + '%';
+    miniThumbEls[index].style.bottom = pct + '%';
+  }
 
   function updateRangeFill(input) {
     const min = Number(input.min) || 0;
@@ -79,7 +118,7 @@
     titleEl.textContent = state.title
       ? `${state.title}${state.total ? ` (${state.index + 1}/${state.total})` : ''}`
       : '재생 중인 곡 없음';
-    btnPlay.textContent = state.playing ? '⏸' : '▶';
+    btnPlay.innerHTML = state.playing ? PAUSE_ICON : PLAY_ICON;
     if (!volumeDragging && typeof state.volume === 'number') {
       volume.value = String(Math.round(state.volume * 100));
       updateRangeFill(volume);
@@ -98,7 +137,10 @@
     if (!eqDragging && state.eq) {
       if (Array.isArray(state.eq.bands)) {
         miniSliders.forEach((s, i) => {
-          if (state.eq.bands[i] != null) s.value = state.eq.bands[i];
+          if (state.eq.bands[i] != null) {
+            s.value = state.eq.bands[i];
+            setMiniEqVisual(i, Number(state.eq.bands[i]));
+          }
         });
       }
       if (typeof state.eq.reverb === 'number') {

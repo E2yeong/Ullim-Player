@@ -85,9 +85,12 @@ function createWindow(startHidden) {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   // Closing the window minimizes to the tray instead of quitting, so playback
-  // (and the overlay) can keep running in the background.
+  // (and the overlay) can keep running in the background. This is the 설정
+  // tab's "닫아도 트레이에 상주" toggle — off means close really quits, so the
+  // settings file is read fresh on every close rather than cached at launch.
   mainWindow.on('close', (e) => {
-    if (!app.isQuitting) {
+    const trayOnClose = readSettingsFile().trayOnClose !== false;
+    if (!app.isQuitting && trayOnClose) {
       e.preventDefault();
       mainWindow.hide();
     }
@@ -158,8 +161,11 @@ function getIntroVideoPath() {
 }
 
 function createSplashWindow(onDone) {
+  // 설정 tab's "시작할 때 인트로 영상" toggle — skip the splash window entirely
+  // when the user has turned it off.
+  const introEnabled = readSettingsFile().introEnabled !== false;
   const videoPath = getIntroVideoPath();
-  if (!fs.existsSync(videoPath)) {
+  if (!introEnabled || !fs.existsSync(videoPath)) {
     onDone();
     return;
   }
@@ -327,6 +333,14 @@ app.whenReady().then(() => {
   createWindow(true);
   createTray();
   setupAutoUpdater();
+
+  // 설정 tab's "자동 업데이트 확인" toggle — a silent check on launch. Reuses
+  // the same autoUpdater events the manual "업데이트 확인" button listens to,
+  // so the renderer shows the result the same way either way.
+  const autoUpdateCheck = readSettingsFile().autoUpdateCheck !== false;
+  if (app.isPackaged && autoUpdateCheck) {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }
 
   createSplashWindow(() => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();

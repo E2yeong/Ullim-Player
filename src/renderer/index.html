@@ -9,81 +9,158 @@
 <body>
 <div id="app" class="app">
 
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <h1>재생목록</h1>
-      <div class="sidebar-actions">
-        <button id="btnAddFiles" class="icon-btn" title="파일 추가">＋ 추가</button>
-        <button id="btnClearList" class="icon-btn ghost" title="전체 삭제">전체 삭제</button>
-      </div>
-    </div>
-    <ul id="playlist" class="playlist"></ul>
-    <div id="dropHint" class="drop-hint">여기에 mp3 / mp4 파일을 끌어다 놓으세요</div>
+  <!-- Left icon rail: only "홈" (the 1a-style combined player) and "설정" are
+       separate destinations — everything else (list/stage/EQ) stays on one
+       screen together, per the "정석안" density the mockup called for. -->
+  <nav class="rail">
+    <button class="rail-btn active" data-page="main" title="홈">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/></svg>
+      <span class="rail-label">홈</span>
+    </button>
+    <div class="rail-spacer"></div>
+    <button id="btnOverlay" class="rail-btn" title="오버레이 모드 (항상 위에 떠 있는 미니 플레이어)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 2-1.5 3.5-2 5.5L18 15H6l4-3.5C9.5 9.5 8 8 8 6a4 4 0 0 1 4-4z"/><path d="M12 15v7"/></svg>
+      <span class="rail-label">오버레이</span>
+    </button>
+    <button class="rail-btn" data-page="settings" title="설정">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M4.2 6.2l2.1 2.1M17.7 15.7l2.1 2.1M2.5 12h3M18.5 12h3M4.2 17.8l2.1-2.1M17.7 8.3l2.1-2.1"/></svg>
+      <span class="rail-label">설정</span>
+    </button>
+  </nav>
 
-    <div class="update-box">
-      <div class="update-row">
-        <span id="appVersion" class="app-version">v-</span>
-        <button id="btnCheckUpdate" class="icon-btn ghost small">업데이트 확인</button>
-      </div>
-      <div id="updateStatus" class="update-status"></div>
-    </div>
-  </aside>
+  <div class="pages">
 
-  <main class="main">
-    <div class="stage">
-      <div class="video-wrap" id="videoWrap">
-        <video id="mediaEl" playsinline></video>
-        <div id="coverArt" class="cover-art">
-          <canvas id="rippleCanvas" class="ripple-canvas"></canvas>
-          <div class="cover-note">♪</div>
+    <!-- ---------- 홈 page: 좌 재생목록 / 우 스테이지 + EQ, 전부 한 화면 (1a 정석안) ---------- -->
+    <section class="page active" id="pageMain">
+
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h6>재생목록 · <span id="trackCount">0곡</span></h6>
+          <div class="sidebar-actions">
+            <button id="btnAddFiles" class="btn btn-primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              파일 추가
+            </button>
+            <button id="btnClearList" class="btn btn-secondary">전체 삭제</button>
+          </div>
         </div>
-        <button id="btnWaveToggle" class="wave-toggle" title="파형 애니메이션 켜기/끄기">🌊</button>
-      </div>
-    </div>
+        <ul id="playlist" class="playlist"></ul>
+        <div id="dropHint" class="drop-hint">여기에 mp3 / mp4 파일을 끌어다 놓으세요</div>
+      </aside>
 
-    <div class="now-playing">
-      <div class="track-title" id="trackTitle">재생할 파일을 선택하세요</div>
-      <div class="track-sub" id="trackSub">&nbsp;</div>
-    </div>
+      <main class="main">
+        <div class="stage">
+          <div class="video-wrap" id="videoWrap">
+            <video id="mediaEl" playsinline></video>
+            <div id="coverArt" class="cover-art">
+              <canvas id="rippleCanvas" class="ripple-canvas"></canvas>
+              <div class="cover-note">♪</div>
+            </div>
+            <button id="btnWaveToggle" class="wave-toggle" title="파형 애니메이션 켜기/끄기">
+              <svg viewBox="0 0 22 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="10" x2="3" y2="14"/><line x1="7" y1="6" x2="7" y2="18"/><line x1="11" y1="3" x2="11" y2="21"/><line x1="15" y1="7" x2="15" y2="17"/><line x1="19" y1="10" x2="19" y2="14"/></svg>
+            </button>
+          </div>
+        </div>
 
-    <div class="seek-row">
-      <span id="curTime" class="time">0:00</span>
-      <input type="range" id="seekBar" min="0" max="1000" value="0" step="1" />
-      <span id="durTime" class="time">0:00</span>
-    </div>
+        <div class="now-playing">
+          <div class="track-title" id="trackTitle">재생할 파일을 선택하세요</div>
+          <div class="track-sub" id="trackSub">&nbsp;</div>
+        </div>
 
-    <div class="controls-row">
-      <button id="btnShuffle" class="ctrl-btn" title="셔플">🔀</button>
-      <button id="btnPrev" class="ctrl-btn" title="이전 곡">⏮</button>
-      <button id="btnPlay" class="ctrl-btn play" title="재생/일시정지">▶</button>
-      <button id="btnNext" class="ctrl-btn" title="다음 곡">⏭</button>
-      <button id="btnRepeat" class="ctrl-btn" title="반복 모드">🔁</button>
-      <button id="btnOverlay" class="ctrl-btn" title="오버레이 모드 (항상 위에 떠 있는 미니 플레이어)">📌</button>
+        <div class="seek-row">
+          <span id="curTime" class="time">0:00</span>
+          <input type="range" id="seekBar" min="0" max="1000" value="0" step="1" />
+          <span id="durTime" class="time">0:00</span>
+        </div>
 
-      <div class="volume-box">
-        <span>🔊</span>
-        <input type="range" id="volumeBar" min="0" max="100" value="80" />
-      </div>
-    </div>
+        <div class="controls-row">
+          <button id="btnShuffle" class="btn btn-icon ctrl-btn" title="셔플">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+          </button>
+          <button id="btnPrev" class="btn btn-icon ctrl-btn" title="이전 곡">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="19 20 9 12 19 4 19 20"/><rect x="4.5" y="4" width="2.2" height="16" rx="0.8"/></svg>
+          </button>
+          <button id="btnPlay" class="btn btn-primary ctrl-btn play" title="재생/일시정지">
+            <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          </button>
+          <button id="btnNext" class="btn btn-icon ctrl-btn" title="다음 곡">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 4 15 12 5 20 5 4"/><rect x="17.3" y="4" width="2.2" height="16" rx="0.8"/></svg>
+          </button>
+          <button id="btnRepeat" class="btn btn-icon ctrl-btn" title="반복 모드">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+            <span class="repeat-one-badge" id="repeatOneBadge">1</span>
+          </button>
 
-    <section class="eq-panel">
-      <div class="eq-header">
-        <h2>이퀄라이저</h2>
-        <button id="btnEqToggle" class="icon-btn ghost" title="EQ 켜기/끄기">EQ ON</button>
-      </div>
-      <div class="eq-bands" id="eqBands"></div>
-      <div class="eq-slider reverb-slider">
-        <label>Reverb<span id="valReverb">0 %</span></label>
-        <input type="range" id="reverbSlider" min="0" max="100" step="1" value="0" />
-      </div>
-      <div class="eq-presets">
-        <button class="preset-btn" data-preset="flat">Flat</button>
-        <button class="preset-btn" data-preset="bassBoost">Bass Boost</button>
-        <button class="preset-btn" data-preset="vocal">Vocal</button>
-        <button class="preset-btn" data-preset="hall">Hall Reverb</button>
+          <div class="volume-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 9 3 15 8 15 13 20 13 4 8 9 3 9" fill="currentColor" stroke="none"/><path d="M17 8a5 5 0 0 1 0 8"/><path d="M20 5a9 9 0 0 1 0 14"/></svg>
+            <input type="range" id="volumeBar" min="0" max="100" value="80" />
+          </div>
+        </div>
+
+        <section class="eq-panel">
+          <div class="eq-header">
+            <h6>이퀄라이저 · 8밴드</h6>
+            <div class="eq-header-actions">
+              <button class="preset-btn" data-preset="flat">Flat</button>
+              <button class="preset-btn" data-preset="bassBoost">Bass Boost</button>
+              <button class="preset-btn" data-preset="vocal">Vocal</button>
+              <button class="preset-btn" data-preset="hall">Hall Reverb</button>
+              <button id="btnEqToggle" class="btn btn-ghost">EQ ON</button>
+            </div>
+          </div>
+          <div class="eq-bands" id="eqBands"></div>
+          <div class="eq-slider reverb-slider">
+            <label>Reverb<span id="valReverb">0 %</span></label>
+            <input type="range" id="reverbSlider" min="0" max="100" step="1" value="0" />
+          </div>
+          <p class="eq-note">현재 프리셋: <span id="presetLabel">사용자 설정</span> · ±36dB · 리미터가 항상 뒤에서 클리핑을 막아 리버브를 올려도 원음 볼륨은 그대로 유지됩니다.</p>
+        </section>
+      </main>
+    </section>
+
+    <!-- ---------- 설정 page ---------- -->
+    <section class="page" id="pageSettings">
+      <div class="settings-wrap">
+        <h6>설정</h6>
+        <div class="settings-list">
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-label">닫아도 트레이에 상주</div>
+              <div class="setting-desc">창을 닫으면 종료 대신 트레이로 내려가 재생을 계속합니다. 끄면 창을 닫을 때 앱이 완전히 종료됩니다.</div>
+            </div>
+            <button id="toggleTray" class="toggle-switch on"><span class="knob"></span></button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-label">시작할 때 인트로 영상</div>
+              <div class="setting-desc">앱을 켤 때마다 짧은 인트로 영상을 재생합니다.</div>
+            </div>
+            <button id="toggleIntro" class="toggle-switch on"><span class="knob"></span></button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-label">파형 애니메이션</div>
+              <div class="setting-desc">재생 화면에 오디오 반응형 파형을 그립니다. mp4 영상을 볼 때는 자동으로 꺼집니다.</div>
+            </div>
+            <button id="toggleWave" class="toggle-switch on"><span class="knob"></span></button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-label">자동 업데이트 확인</div>
+              <div class="setting-desc">앱을 실행할 때 새 버전이 있는지 조용히 확인합니다.</div>
+            </div>
+            <button id="toggleAutoUpdate" class="toggle-switch on"><span class="knob"></span></button>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <span id="appVersion" class="app-version">v-</span>
+          <button id="btnCheckUpdate" class="btn btn-primary">업데이트 확인</button>
+        </div>
+        <div id="updateStatus" class="update-status"></div>
       </div>
     </section>
-  </main>
+
+  </div>
 </div>
 
 <script src="renderer.js"></script>

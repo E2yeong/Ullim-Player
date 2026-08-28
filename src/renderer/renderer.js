@@ -2,17 +2,27 @@
 // waveform visualizer, settings persistence, and the auto-update UI. Talks to
 // the overlay window and the main process only through window.api (see
 // preload.js) — never directly, since contextIsolation is on.
+//
+// Layout ("정석안" — see PROJECT_SPEC.md §4.12): a left icon rail switches
+// between two destinations, 홈 (재생목록 + 스테이지 + EQ, all on one screen)
+// and 설정. Everything playback-related lives together on 홈 at a relaxed
+// density, matching the UI mockup this was built from — it is deliberately
+// NOT split into separate list/now-playing/EQ tabs.
 (() => {
   'use strict';
 
   // ---------- State ----------
   const state = {
-    tracks: [],        // { path, name }
+    tracks: [],        // { path, name, durationSec }
     currentIndex: -1,
     repeatMode: 'off',  // off -> all -> one
     shuffle: false,
     eqEnabled: true,
     waveformEnabled: true,
+    currentPreset: null, // EQ_PRESETS key, or null once the user hand-tweaks a slider
+    trayOnClose: true,   // read directly by main.js's close handler via the settings file
+    introEnabled: true,  // read directly by main.js before creating the splash window
+    autoUpdateCheck: true, // read directly by main.js for the silent startup check
     seeking: false
   };
 
@@ -20,6 +30,7 @@
   const mediaEl = document.getElementById('mediaEl');
   const coverArt = document.getElementById('coverArt');
   const playlistEl = document.getElementById('playlist');
+  const trackCountEl = document.getElementById('trackCount');
   const trackTitle = document.getElementById('trackTitle');
   const trackSub = document.getElementById('trackSub');
   const seekBar = document.getElementById('seekBar');
@@ -37,16 +48,48 @@
   const btnClearList = document.getElementById('btnClearList');
   const btnEqToggle = document.getElementById('btnEqToggle');
   const btnWaveToggle = document.getElementById('btnWaveToggle');
+  const presetLabelEl = document.getElementById('presetLabel');
 
   const appVersionEl = document.getElementById('appVersion');
   const btnCheckUpdate = document.getElementById('btnCheckUpdate');
   const updateStatusEl = document.getElementById('updateStatus');
+
+  const toggleTray = document.getElementById('toggleTray');
+  const toggleIntro = document.getElementById('toggleIntro');
+  const toggleWave = document.getElementById('toggleWave');
+  const toggleAutoUpdate = document.getElementById('toggleAutoUpdate');
 
   const eqBandsEl = document.getElementById('eqBands');
   const reverbSlider = document.getElementById('reverbSlider');
   const valReverb = document.getElementById('valReverb');
 
   const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'mkv']);
+
+  // ---------- Rail + pages ----------
+  // Only 홈/설정 are real destinations — the overlay rail button is an action,
+  // not a page switch, so it has no data-page attribute and is excluded here.
+  const railBtns = document.querySelectorAll('.rail-btn[data-page]');
+  const pages = {
+    main: document.getElementById('pageMain'),
+    settings: document.getElementById('pageSettings')
+  };
+
+  function switchPage(name) {
+    if (!pages[name]) return;
+    Object.entries(pages).forEach(([key, el]) => el.classList.toggle('active', key === name));
+    railBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.page === name));
+    // the waveform canvas measures its container's rendered size, which is 0
+    // while its page isn't the active one — re-measure now that it's shown.
+    if (name === 'main') resizeRippleCanvas();
+  }
+
+  railBtns.forEach((btn) => {
+    btn.addEventListener('click', () => switchPage(btn.dataset.page));
+  });
+
+  // ---------- Play/pause icon ----------
+  const PLAY_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+  const PAUSE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
 
   // ---------- 8-band graphic EQ config ----------
   const EQ_BANDS = [
@@ -62,8 +105,15 @@
   const EQ_MIN = -36;
   const EQ_MAX = 36;
 
+  // Each band is a real (but invisible) <input type="range"> for drag/
+  // keyboard interaction, stacked over a hand-drawn track + fill + circular
+  // thumb — see the .eq-slider-* rules in style.css for why this isn't just
+  // a styled native slider. eqFillEls/eqThumbEls are positioned by
+  // setEqVisual() below whenever a band's value changes.
   const eqSliderEls = [];
   const eqValEls = [];
+  const eqFillEls = [];
+  const eqThumbEls = [];
   EQ_BANDS.forEach((band, i) => {
     const wrap = document.createElement('div');
     wrap.className = 'eq-band';
@@ -72,26 +122,59 @@
     val.className = 'eq-val';
     val.textContent = '0';
 
+    const sliderWrap = document.createElement('div');
+    sliderWrap.className = 'eq-slider-wrap';
+
+    const track = document.createElement('div');
+    track.className = 'eq-slider-track';
+
+    const fill = document.createElement('div');
+    fill.className = 'eq-slider-fill';
+
+    const thumb = document.createElement('div');
+    thumb.className = 'eq-slider-thumb';
+
     const input = document.createElement('input');
     input.type = 'range';
+    input.className = 'eq-slider-input';
     input.min = String(EQ_MIN);
     input.max = String(EQ_MAX);
     input.step = '1';
     input.value = '0';
     input.id = `eqSlider${i}`;
 
+    track.appendChild(fill);
+    track.appendChild(thumb);
+    sliderWrap.appendChild(track);
+    sliderWrap.appendChild(input);
+
     const freq = document.createElement('span');
     freq.className = 'eq-freq';
     freq.textContent = band.label;
 
     wrap.appendChild(val);
-    wrap.appendChild(input);
+    wrap.appendChild(sliderWrap);
     wrap.appendChild(freq);
     eqBandsEl.appendChild(wrap);
 
     eqSliderEls.push(input);
     eqValEls.push(val);
+    eqFillEls.push(fill);
+    eqThumbEls.push(thumb);
   });
+
+  // Positions one band's fill bar + thumb to match its current value,
+  // anchored at 0dB (the center) so a boost grows the bar upward and a cut
+  // grows it downward — the way real EQ hardware/software shows it.
+  function setEqVisual(index, value) {
+    const pct = ((value - EQ_MIN) / (EQ_MAX - EQ_MIN)) * 100;
+    const centerPct = ((0 - EQ_MIN) / (EQ_MAX - EQ_MIN)) * 100;
+    const lo = Math.min(pct, centerPct);
+    const hi = Math.max(pct, centerPct);
+    eqFillEls[index].style.bottom = lo + '%';
+    eqFillEls[index].style.height = (hi - lo) + '%';
+    eqThumbEls[index].style.bottom = pct + '%';
+  }
 
   // ---------- Web Audio EQ chain ----------
   let audioCtx = null;
@@ -193,6 +276,7 @@
     if (!slider) return;
     slider.value = value;
     eqValEls[index].textContent = value;
+    setEqVisual(index, Number(value));
     applyEqValues();
   }
 
@@ -202,6 +286,35 @@
     updateRangeFill(reverbSlider);
     valReverb.textContent = value + ' %';
     applyEqValues();
+  }
+
+  // ---------- EQ presets ----------
+  // Band order: 60, 150, 400, 1K, 2.5K, 6K, 12K, 16K
+  const EQ_PRESETS = {
+    flat: { bands: [0, 0, 0, 0, 0, 0, 0, 0], reverb: 0 },
+    bassBoost: { bands: [26, 18, 5, 0, 0, 0, 0, 0], reverb: 10 },
+    vocal: { bands: [-8, -4, -2, 4, 8, 5, 1, 0], reverb: 12 },
+    hall: { bands: [2, 0, 0, 0, 0, 3, 5, 4], reverb: 90 }
+  };
+
+  // Reflects state.currentPreset onto the preset buttons' active styling and
+  // the small "현재 프리셋" label under the EQ panel.
+  function updatePresetButtons() {
+    document.querySelectorAll('.preset-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.preset === state.currentPreset);
+    });
+    const presetBtn = state.currentPreset
+      ? document.querySelector(`.preset-btn[data-preset="${state.currentPreset}"]`)
+      : null;
+    presetLabelEl.textContent = presetBtn ? presetBtn.textContent : '사용자 설정';
+  }
+
+  // Manually dragging a band or the reverb slider means the sound no longer
+  // matches any preset exactly.
+  function clearPreset() {
+    if (state.currentPreset === null) return;
+    state.currentPreset = null;
+    updatePresetButtons();
   }
 
   // ---------- Waveform visualizer ----------
@@ -287,17 +400,17 @@
     rippleCtx.closePath();
 
     const gradient = rippleCtx.createLinearGradient(0, 0, w, 0);
-    gradient.addColorStop(0, 'rgba(108, 92, 231, 0.12)');
-    gradient.addColorStop(0.5, 'rgba(160, 146, 255, 0.55)');
-    gradient.addColorStop(1, 'rgba(108, 92, 231, 0.12)');
+    gradient.addColorStop(0, 'rgba(145, 132, 217, 0.12)');
+    gradient.addColorStop(0.5, 'rgba(210, 206, 253, 0.55)');
+    gradient.addColorStop(1, 'rgba(145, 132, 217, 0.12)');
     rippleCtx.fillStyle = gradient;
-    rippleCtx.shadowColor = 'rgba(139, 124, 240, 0.55)';
+    rippleCtx.shadowColor = 'rgba(145, 132, 217, 0.55)';
     rippleCtx.shadowBlur = 18;
     rippleCtx.fill();
 
     rippleCtx.shadowBlur = 0;
     rippleCtx.lineWidth = 1.5;
-    rippleCtx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+    rippleCtx.strokeStyle = 'rgba(233, 233, 237, 0.45)';
     rippleCtx.stroke();
   }
 
@@ -311,7 +424,7 @@
 
     const rect = coverArt.getBoundingClientRect();
     const w = rect.width, h = rect.height;
-    if (w === 0 || h === 0) return;
+    if (w === 0 || h === 0) return; // also covers 홈 not being the active page
 
     updateWaveEnvelope();
     drawWaveform(w, h);
@@ -334,8 +447,22 @@
     if (coverNoteEl) coverNoteEl.classList.remove('faded');
   }
 
+  // Shared by the on-stage waveform-toggle button and the 설정 page's toggle
+  // switch so both controls (and the saved settings file) always agree.
+  function setWaveformEnabled(enabled) {
+    state.waveformEnabled = enabled;
+    btnWaveToggle.classList.toggle('off', !enabled);
+    toggleWave.classList.toggle('on', enabled);
+    if (enabled) {
+      if (!mediaEl.paused) startRippleLoop();
+    } else {
+      stopRippleLoop();
+    }
+    scheduleSave();
+  }
+
   window.addEventListener('resize', () => {
-    if (!coverArt.classList.contains('hidden')) resizeRippleCanvas();
+    if (pages.main.classList.contains('active') && !coverArt.classList.contains('hidden')) resizeRippleCanvas();
   });
 
   // ---------- Playlist helpers ----------
@@ -349,11 +476,36 @@
     return parts[parts.length - 1];
   }
 
+  // Loads a throwaway <video> just far enough to read its duration, so the
+  // playlist can show a length without ever having to play the file. Works
+  // for audio-only files too — Chromium is happy to read metadata off a
+  // <video> element regardless of whether there's a picture. Never attached
+  // to the DOM, so a Set holds a strong reference until it settles —
+  // otherwise it'd be eligible for GC mid-load with nothing else pointing to it.
+  const pendingProbes = new Set();
+  function probeDuration(track) {
+    const encoded = encodeURI(track.path.replace(/\\/g, '/'));
+    const url = 'file:///' + encoded.replace(/^\/+/, '');
+    const probe = document.createElement('video');
+    probe.preload = 'metadata';
+    pendingProbes.add(probe);
+    const cleanup = () => pendingProbes.delete(probe);
+    probe.addEventListener('loadedmetadata', () => {
+      track.durationSec = probe.duration;
+      renderPlaylist();
+      cleanup();
+    }, { once: true });
+    probe.addEventListener('error', cleanup, { once: true });
+    probe.src = url;
+  }
+
   function addFiles(paths) {
     let added = 0;
     for (const p of paths) {
       if (!p) continue;
-      state.tracks.push({ path: p, name: baseName(p) });
+      const track = { path: p, name: baseName(p), durationSec: null };
+      state.tracks.push(track);
+      probeDuration(track);
       added++;
     }
     if (added) renderPlaylist();
@@ -364,6 +516,8 @@
   }
 
   function renderPlaylist() {
+    trackCountEl.textContent = state.tracks.length + '곡';
+
     playlistEl.innerHTML = '';
     state.tracks.forEach((track, i) => {
       const li = document.createElement('li');
@@ -378,6 +532,10 @@
       name.textContent = track.name;
       name.title = track.path;
 
+      const dur = document.createElement('span');
+      dur.className = 'dur';
+      dur.textContent = track.durationSec ? fmtTime(track.durationSec) : '';
+
       const remove = document.createElement('span');
       remove.className = 'remove';
       remove.textContent = '✕';
@@ -388,6 +546,7 @@
 
       li.appendChild(idx);
       li.appendChild(name);
+      li.appendChild(dur);
       li.appendChild(remove);
       li.addEventListener('click', () => loadTrack(i, true));
 
@@ -402,7 +561,7 @@
       state.currentIndex = -1;
       mediaEl.removeAttribute('src');
       trackTitle.textContent = '재생할 파일을 선택하세요';
-      trackSub.textContent = ' ';
+      trackSub.textContent = ' ';
       updateCoverVisibility(true);
       broadcastState();
     } else if (wasCurrent) {
@@ -421,7 +580,7 @@
     mediaEl.pause();
     mediaEl.removeAttribute('src');
     trackTitle.textContent = '재생할 파일을 선택하세요';
-    trackSub.textContent = ' ';
+    trackSub.textContent = ' ';
     updateCoverVisibility(true);
     renderPlaylist();
     setPlayIcon(false);
@@ -464,7 +623,7 @@
   }
 
   function setPlayIcon(playing) {
-    btnPlay.textContent = playing ? '⏸' : '▶';
+    btnPlay.innerHTML = playing ? PAUSE_ICON : PLAY_ICON;
   }
 
   function togglePlay() {
@@ -545,11 +704,9 @@
     input.style.setProperty('--fill', pct + '%');
   }
 
-  const REPEAT_LABELS = { off: '🔁', all: '🔁', one: '🔂' };
-
   function updateRepeatButton() {
-    btnRepeat.textContent = REPEAT_LABELS[state.repeatMode];
     btnRepeat.classList.toggle('active', state.repeatMode !== 'off');
+    btnRepeat.classList.toggle('repeat-one', state.repeatMode === 'one');
     btnRepeat.title =
       state.repeatMode === 'off' ? '반복 없음' :
       state.repeatMode === 'all' ? '전체 반복' : '한 곡 반복';
@@ -597,10 +754,12 @@
         break;
       case 'eq-band':
         applyEqBand(cmd.index, cmd.value);
+        clearPreset();
         scheduleSave();
         break;
       case 'eq-reverb':
         applyReverb(cmd.value);
+        clearPreset();
         scheduleSave();
         break;
     }
@@ -632,6 +791,10 @@
       shuffle: state.shuffle,
       eqEnabled: state.eqEnabled,
       waveformEnabled: state.waveformEnabled,
+      currentPreset: state.currentPreset,
+      trayOnClose: state.trayOnClose,
+      introEnabled: state.introEnabled,
+      autoUpdateCheck: state.autoUpdateCheck,
       volume: mediaEl.volume,
       eq: {
         bands: eqSliderEls.map((s) => Number(s.value)),
@@ -669,15 +832,22 @@
         }
         applyReverb(data.eq.reverb ?? 0);
       }
+      if (typeof data.currentPreset === 'string' && EQ_PRESETS[data.currentPreset]) {
+        state.currentPreset = data.currentPreset;
+      }
+      updatePresetButtons();
       if (typeof data.eqEnabled === 'boolean') {
         state.eqEnabled = data.eqEnabled;
         btnEqToggle.classList.toggle('on', state.eqEnabled);
         btnEqToggle.textContent = state.eqEnabled ? 'EQ ON' : 'EQ OFF';
       }
-      if (typeof data.waveformEnabled === 'boolean') {
-        state.waveformEnabled = data.waveformEnabled;
-        btnWaveToggle.classList.toggle('off', !state.waveformEnabled);
-      }
+      setWaveformEnabled(typeof data.waveformEnabled === 'boolean' ? data.waveformEnabled : true);
+      state.trayOnClose = data.trayOnClose !== false;
+      setToggleUI(toggleTray, state.trayOnClose);
+      state.introEnabled = data.introEnabled !== false;
+      setToggleUI(toggleIntro, state.introEnabled);
+      state.autoUpdateCheck = data.autoUpdateCheck !== false;
+      setToggleUI(toggleAutoUpdate, state.autoUpdateCheck);
       if (data.repeatMode) {
         state.repeatMode = data.repeatMode;
         updateRepeatButton();
@@ -694,6 +864,8 @@
 
       if (Array.isArray(data.tracks) && data.tracks.length) {
         state.tracks = data.tracks;
+        // older saves predate the duration column — backfill it lazily.
+        state.tracks.forEach((t) => { if (!t.durationSec) probeDuration(t); });
         renderPlaylist();
         const idx = typeof data.currentIndex === 'number' ? data.currentIndex : -1;
         if (idx >= 0 && idx < state.tracks.length) {
@@ -773,6 +945,31 @@
     }
   });
 
+  // ---------- 설정 page toggles ----------
+  // trayOnClose / introEnabled / autoUpdateCheck have no other renderer-side
+  // effect — they're only persisted here and read directly by main.js out of
+  // the settings file (close handler, splash-window creation, startup check).
+  function setToggleUI(btn, on) {
+    btn.classList.toggle('on', on);
+  }
+
+  toggleTray.addEventListener('click', () => {
+    state.trayOnClose = !state.trayOnClose;
+    setToggleUI(toggleTray, state.trayOnClose);
+    scheduleSave();
+  });
+  toggleIntro.addEventListener('click', () => {
+    state.introEnabled = !state.introEnabled;
+    setToggleUI(toggleIntro, state.introEnabled);
+    scheduleSave();
+  });
+  toggleAutoUpdate.addEventListener('click', () => {
+    state.autoUpdateCheck = !state.autoUpdateCheck;
+    setToggleUI(toggleAutoUpdate, state.autoUpdateCheck);
+    scheduleSave();
+  });
+  toggleWave.addEventListener('click', () => setWaveformEnabled(!state.waveformEnabled));
+
   // ---------- Event wiring ----------
   btnAddFiles.addEventListener('click', async () => {
     const paths = await window.api.openFilesDialog();
@@ -805,16 +1002,7 @@
     scheduleSave();
   });
 
-  btnWaveToggle.addEventListener('click', () => {
-    state.waveformEnabled = !state.waveformEnabled;
-    btnWaveToggle.classList.toggle('off', !state.waveformEnabled);
-    if (state.waveformEnabled) {
-      if (!mediaEl.paused) startRippleLoop();
-    } else {
-      stopRippleLoop();
-    }
-    scheduleSave();
-  });
+  btnWaveToggle.addEventListener('click', () => setWaveformEnabled(!state.waveformEnabled));
 
   mediaEl.addEventListener('play', () => { setPlayIcon(true); broadcastState(); startRippleLoop(); });
   mediaEl.addEventListener('pause', () => { setPlayIcon(false); broadcastState(); stopRippleLoop(); });
@@ -866,6 +1054,7 @@
   eqSliderEls.forEach((slider, i) => {
     slider.addEventListener('input', () => {
       applyEqBand(i, slider.value);
+      clearPreset();
       scheduleSave();
       broadcastState();
     });
@@ -873,17 +1062,10 @@
 
   reverbSlider.addEventListener('input', () => {
     applyReverb(reverbSlider.value);
+    clearPreset();
     scheduleSave();
     broadcastState();
   });
-
-  // Band order: 60, 150, 400, 1K, 2.5K, 6K, 12K, 16K
-  const EQ_PRESETS = {
-    flat: { bands: [0, 0, 0, 0, 0, 0, 0, 0], reverb: 0 },
-    bassBoost: { bands: [26, 18, 5, 0, 0, 0, 0, 0], reverb: 10 },
-    vocal: { bands: [-8, -4, -2, 4, 8, 5, 1, 0], reverb: 12 },
-    hall: { bands: [2, 0, 0, 0, 0, 3, 5, 4], reverb: 90 }
-  };
 
   document.querySelectorAll('.preset-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -891,6 +1073,8 @@
       if (!p) return;
       p.bands.forEach((value, i) => applyEqBand(i, value));
       applyReverb(p.reverb);
+      state.currentPreset = btn.dataset.preset;
+      updatePresetButtons();
       scheduleSave();
       broadcastState();
     });
@@ -921,6 +1105,7 @@
   });
 
   // Init
+  setPlayIcon(false);
   volumeBar.value = 80;
   mediaEl.volume = 0.8;
   [seekBar, volumeBar, reverbSlider].forEach(updateRangeFill);
