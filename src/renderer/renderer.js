@@ -385,32 +385,37 @@
     }
   }
 
+  // A single waveform rising from the bottom edge (not the old mirrored-
+  // top-and-bottom ribbon, which read as two separate traces) — one curve,
+  // filled down to the baseline, with a bright stroke along just the top edge.
   function drawWaveform(w, h) {
-    const midY = h / 2;
+    const baseline = h;
     const stepX = w / (WAVE_POINTS - 1);
-    const amplitude = h * 0.4;
+    const amplitude = h * 0.85;
 
-    const topPoints = waveEnvelope.map((v, i) => ({ x: i * stepX, y: midY - v * amplitude }));
-    const bottomPoints = waveEnvelope.map((v, i) => ({ x: i * stepX, y: midY + v * amplitude })).reverse();
+    const topPoints = waveEnvelope.map((v, i) => ({ x: i * stepX, y: baseline - v * amplitude }));
 
     rippleCtx.clearRect(0, 0, w, h);
+
     rippleCtx.beginPath();
     tracePath(rippleCtx, topPoints);
-    tracePath(rippleCtx, bottomPoints);
+    rippleCtx.lineTo(w, baseline);
+    rippleCtx.lineTo(0, baseline);
     rippleCtx.closePath();
 
-    const gradient = rippleCtx.createLinearGradient(0, 0, w, 0);
-    gradient.addColorStop(0, 'rgba(145, 132, 217, 0.12)');
-    gradient.addColorStop(0.5, 'rgba(210, 206, 253, 0.55)');
-    gradient.addColorStop(1, 'rgba(145, 132, 217, 0.12)');
+    const gradient = rippleCtx.createLinearGradient(0, 0, 0, baseline);
+    gradient.addColorStop(0, 'rgba(210, 206, 253, 0.6)');
+    gradient.addColorStop(1, 'rgba(145, 132, 217, 0.05)');
     rippleCtx.fillStyle = gradient;
-    rippleCtx.shadowColor = 'rgba(145, 132, 217, 0.55)';
-    rippleCtx.shadowBlur = 18;
+    rippleCtx.shadowColor = 'rgba(145, 132, 217, 0.5)';
+    rippleCtx.shadowBlur = 16;
     rippleCtx.fill();
 
     rippleCtx.shadowBlur = 0;
-    rippleCtx.lineWidth = 1.5;
-    rippleCtx.strokeStyle = 'rgba(233, 233, 237, 0.45)';
+    rippleCtx.lineWidth = 1.8;
+    rippleCtx.strokeStyle = 'rgba(233, 233, 237, 0.5)';
+    rippleCtx.beginPath();
+    tracePath(rippleCtx, topPoints);
     rippleCtx.stroke();
   }
 
@@ -453,6 +458,7 @@
     state.waveformEnabled = enabled;
     btnWaveToggle.classList.toggle('off', !enabled);
     toggleWave.classList.toggle('on', enabled);
+    updateCoverVisibility(false); // may reveal/hide the waveform over an mp4's own picture
     if (enabled) {
       if (!mediaEl.paused) startRippleLoop();
     } else {
@@ -588,10 +594,20 @@
     scheduleSave();
   }
 
+  // Video defaults to showing its own picture, same as always — a saved
+  // waveformEnabled:true from a previous session (the default) shouldn't
+  // silently hide video the next time an mp4 is opened. But once the user
+  // actually clicks the waveform toggle during this run, that's a clear
+  // "I want the waveform, even over video" signal, so it wins from then on
+  // for any track, until they toggle it back off.
+  let userToggledWaveform = false;
+
   function updateCoverVisibility(forceCover) {
     const ext = state.currentIndex >= 0 ? extOf(state.tracks[state.currentIndex].path) : '';
     const isVideo = VIDEO_EXT.has(ext) && mediaEl.videoWidth > 0;
-    if (forceCover || !isVideo) {
+    const videoWantsWaveform = userToggledWaveform && state.waveformEnabled;
+    const showCover = forceCover || !isVideo || videoWantsWaveform;
+    if (showCover) {
       coverArt.classList.remove('hidden');
       resizeRippleCanvas();
     } else {
@@ -968,7 +984,7 @@
     setToggleUI(toggleAutoUpdate, state.autoUpdateCheck);
     scheduleSave();
   });
-  toggleWave.addEventListener('click', () => setWaveformEnabled(!state.waveformEnabled));
+  toggleWave.addEventListener('click', () => { userToggledWaveform = true; setWaveformEnabled(!state.waveformEnabled); });
 
   // ---------- Event wiring ----------
   btnAddFiles.addEventListener('click', async () => {
@@ -1002,7 +1018,7 @@
     scheduleSave();
   });
 
-  btnWaveToggle.addEventListener('click', () => setWaveformEnabled(!state.waveformEnabled));
+  btnWaveToggle.addEventListener('click', () => { userToggledWaveform = true; setWaveformEnabled(!state.waveformEnabled); });
 
   mediaEl.addEventListener('play', () => { setPlayIcon(true); broadcastState(); startRippleLoop(); });
   mediaEl.addEventListener('pause', () => { setPlayIcon(false); broadcastState(); stopRippleLoop(); });

@@ -170,16 +170,25 @@ MediaElementSource
 - `masterGain`에서 `AnalyserNode`(fftSize 512, smoothing 0.8)를 탭으로 분기 연결 (오디오 경로 자체에는
   영향 없음, 시각화 전용). 주파수 데이터(`analyserData`, 전체 레벨용)와 시간 도메인 데이터
   (`waveformData`, 파형 모양용)를 둘 다 사용.
-- **모양은 원형 리플이 아니라 가로로 펼쳐진 파형** (오디오 편집 프로그램의 웨이브폼과 비슷한 느낌).
-  `getByteTimeDomainData()`를 `WAVE_POINTS`(48)개 구간으로 나눠 각 구간의 최대 진폭을 뽑고, 그 값을
-  "envelope" 배열에 저장 — 새 값이 크면 즉시 튀어오르지만 작으면 `WAVE_DECAY`(0.93)씩만 감쇠시켜서
-  **파형이 순간적으로 사라지지 않고 잔상처럼 오래 남도록** 만듦 (첫 버전은 매 프레임 즉시 사라지는
-  원형 ripple이었는데 "파형이 좀 더 오래갔으면"이라는 피드백을 받고 이 방식으로 바꿈).
-  이 envelope을 위/아래로 미러링해서 부드러운 곡선(`quadraticCurveTo`)으로 잇고 보라색 그라데이션 +
-  glow로 채워서 그림.
-- 커버아트 영역(`#coverArt`, 실제 영상이 아니라 오디오 전용 재생일 때만 보임)에 `<canvas>`로 그려짐 —
-  실제 mp4 영상 위를 덮지 않음. 그래도 "영상 보고 싶을 때도 있다"는 요청으로 `#btnWaveToggle` 버튼을
-  달아 `state.waveformEnabled`로 완전히 껐다 켤 수 있게 함 (설정에 저장됨).
+- **모양은 위/아래로 미러링된 리본이 아니라 단일 파형** — 바닥에서 솟아오르는 하나의 곡선(산맥
+  실루엣 느낌)이다. `getByteTimeDomainData()`를 `WAVE_POINTS`(48)개 구간으로 나눠 각 구간의 최대
+  진폭을 뽑고, 그 값을 "envelope" 배열에 저장 — 새 값이 크면 즉시 튀어오르지만 작으면
+  `WAVE_DECAY`(0.93)씩만 감쇠시켜서 **파형이 순간적으로 사라지지 않고 잔상처럼 오래 남도록** 만듦
+  (맨 처음엔 매 프레임 즉시 사라지는 원형 ripple 이었다가 "더 오래갔으면"이라는 피드백으로 감쇠 방식
+  으로 바꿨고, 그 다음엔 이 envelope을 위/아래로 미러링해 리본처럼 그렸다가 "2갈래로 갈라져 보인다"는
+  피드백을 받고 최종적으로 지금의 단일 곡선 형태가 됨). `tracePath()`로 부드러운 곡선
+  (`quadraticCurveTo`)을 그린 뒤 바닥까지 내려와 닫힌 도형으로 채우고, 보라색 그라데이션 + glow +
+  위쪽 가장자리에만 밝은 stroke를 얹어 그림.
+- 커버아트 영역(`#coverArt`)에 `<canvas>`로 그려짐. 오디오 전용 재생 시엔 항상 이 영역이 보이고,
+  mp4 재생 시엔 기본적으로 실제 영상이 보임 — **단, `#btnWaveToggle`(스테이지) 또는 설정 페이지의
+  파형 토글을 사용자가 실제로 한 번이라도 클릭하면, 그 세션 동안은 그 마지막 선택(on/off)이 영상보다
+  우선한다** (`userToggledWaveform` 세션 변수, 저장되지 않음 — 앱을 다시 켜면 mp4는 항상 자기 영상부터
+  보여주는 기본값으로 돌아옴). 그냥 저장된 `waveformEnabled:true`가 기본값이라고 해서 mp4를 열자마자
+  영상이 파형으로 가려지면 안 되기 때문에 이렇게 분리함 — `state.waveformEnabled` 자체는 여전히
+  "파형을 그릴지"만 뜻하고, `userToggledWaveform && state.waveformEnabled`가 "영상 대신 파형을 보여줄지"
+  를 결정한다. 두 버튼(스테이지의 🌊, 설정의 토글) 모두 클릭 시 `userToggledWaveform = true`를 세팅한
+  뒤 `setWaveformEnabled()`를 호출한다 — `setWaveformEnabled()` 자체(설정 복원 시에도 호출됨)는 이
+  플래그를 건드리지 않아서, 저장된 설정을 불러오는 것만으로는 영상이 가려지지 않는다.
 - `mediaEl`의 `play`/`pause` 이벤트로 `requestAnimationFrame` 루프를 시작/정지 (재생 중이 아닐 때는
   그리지 않아 CPU 낭비 없음, `waveformEnabled`가 꺼져 있으면 애초에 시작 안 함).
 - 오버레이의 작은 점(dot)도 같은 컨셉으로 동기화됨: 전체 레벨을 100ms 간격으로 별도의 가벼운 IPC
