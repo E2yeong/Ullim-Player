@@ -105,15 +105,13 @@
   const EQ_MIN = -36;
   const EQ_MAX = 36;
 
-  // Each band is a real (but invisible) <input type="range"> for drag/
-  // keyboard interaction, stacked over a hand-drawn track + fill + circular
-  // thumb — see the .eq-slider-* rules in style.css for why this isn't just
-  // a styled native slider. eqFillEls/eqThumbEls are positioned by
-  // setEqVisual() below whenever a band's value changes.
+  // Each band is a real, fully native <input type="range"> rotated with CSS
+  // (see .eq-slider-wrap in style.css) — same circular thumb and --fill
+  // gradient as every other slider, just vertical. applyEqBand() below calls
+  // updateRangeFill() (defined further down, used by seek/volume/reverb too)
+  // so all of them stay pixel-consistent.
   const eqSliderEls = [];
   const eqValEls = [];
-  const eqFillEls = [];
-  const eqThumbEls = [];
   EQ_BANDS.forEach((band, i) => {
     const wrap = document.createElement('div');
     wrap.className = 'eq-band';
@@ -125,27 +123,14 @@
     const sliderWrap = document.createElement('div');
     sliderWrap.className = 'eq-slider-wrap';
 
-    const track = document.createElement('div');
-    track.className = 'eq-slider-track';
-
-    const fill = document.createElement('div');
-    fill.className = 'eq-slider-fill';
-
-    const thumb = document.createElement('div');
-    thumb.className = 'eq-slider-thumb';
-
     const input = document.createElement('input');
     input.type = 'range';
-    input.className = 'eq-slider-input';
     input.min = String(EQ_MIN);
     input.max = String(EQ_MAX);
     input.step = '1';
     input.value = '0';
     input.id = `eqSlider${i}`;
 
-    track.appendChild(fill);
-    track.appendChild(thumb);
-    sliderWrap.appendChild(track);
     sliderWrap.appendChild(input);
 
     const freq = document.createElement('span');
@@ -159,22 +144,7 @@
 
     eqSliderEls.push(input);
     eqValEls.push(val);
-    eqFillEls.push(fill);
-    eqThumbEls.push(thumb);
   });
-
-  // Positions one band's fill bar + thumb to match its current value,
-  // anchored at 0dB (the center) so a boost grows the bar upward and a cut
-  // grows it downward — the way real EQ hardware/software shows it.
-  function setEqVisual(index, value) {
-    const pct = ((value - EQ_MIN) / (EQ_MAX - EQ_MIN)) * 100;
-    const centerPct = ((0 - EQ_MIN) / (EQ_MAX - EQ_MIN)) * 100;
-    const lo = Math.min(pct, centerPct);
-    const hi = Math.max(pct, centerPct);
-    eqFillEls[index].style.bottom = lo + '%';
-    eqFillEls[index].style.height = (hi - lo) + '%';
-    eqThumbEls[index].style.bottom = pct + '%';
-  }
 
   // ---------- Web Audio EQ chain ----------
   let audioCtx = null;
@@ -276,7 +246,7 @@
     if (!slider) return;
     slider.value = value;
     eqValEls[index].textContent = value;
-    setEqVisual(index, Number(value));
+    updateRangeFill(slider);
     applyEqValues();
   }
 

@@ -38,23 +38,12 @@
   let lastDuration = 0;
 
   const miniSliders = [];
-  const miniFillEls = [];
-  const miniThumbEls = [];
   EQ_BAND_LABELS.forEach((label, i) => {
     const wrap = document.createElement('div');
     wrap.className = 'eq-mini-band';
 
     const sliderWrap = document.createElement('div');
     sliderWrap.className = 'eq-mini-slider-wrap';
-
-    const track = document.createElement('div');
-    track.className = 'eq-mini-track';
-
-    const fill = document.createElement('div');
-    fill.className = 'eq-mini-fill';
-
-    const thumb = document.createElement('div');
-    thumb.className = 'eq-mini-thumb';
 
     const input = document.createElement('input');
     input.type = 'range';
@@ -63,9 +52,6 @@
     input.step = '1';
     input.value = '0';
 
-    track.appendChild(fill);
-    track.appendChild(thumb);
-    sliderWrap.appendChild(track);
     sliderWrap.appendChild(input);
 
     const freq = document.createElement('span');
@@ -76,28 +62,25 @@
     wrap.appendChild(freq);
     eqMiniBandsEl.appendChild(wrap);
     miniSliders.push(input);
-    miniFillEls.push(fill);
-    miniThumbEls.push(thumb);
 
     input.addEventListener('mousedown', () => { eqDragging = true; });
     input.addEventListener('mouseup', () => { eqDragging = false; });
     input.addEventListener('input', () => {
-      setMiniEqVisual(i, Number(input.value));
+      updateRangeFill(input);
       window.overlayApi.sendCommand({ type: 'eq-band', index: i, value: Number(input.value) });
     });
   });
 
-  // Same center-anchored fill as the main window's setEqVisual() —
-  // src/renderer/renderer.js — so a boost grows the bar up from 0dB and a
-  // cut grows it down.
-  function setMiniEqVisual(index, value) {
-    const pct = ((value - EQ_MIN) / (EQ_MAX - EQ_MIN)) * 100;
-    const centerPct = ((0 - EQ_MIN) / (EQ_MAX - EQ_MIN)) * 100;
-    const lo = Math.min(pct, centerPct);
-    const hi = Math.max(pct, centerPct);
-    miniFillEls[index].style.bottom = lo + '%';
-    miniFillEls[index].style.height = (hi - lo) + '%';
-    miniThumbEls[index].style.bottom = pct + '%';
+  // The mini sliders are rotated horizontal inputs (see the note in
+  // overlay.css), so their pre-rotation `width` is what becomes their
+  // vertical length on screen. The wrap's height is flexible (the overlay
+  // can be resized), so that width has to be set in JS to match — called
+  // once the bands exist and again whenever the panel's layout changes.
+  function syncMiniSliderSizes() {
+    miniSliders.forEach((input) => {
+      const wrapHeight = input.parentElement.clientHeight;
+      if (wrapHeight > 0) input.style.width = wrapHeight + 'px';
+    });
   }
 
   function updateRangeFill(input) {
@@ -139,7 +122,7 @@
         miniSliders.forEach((s, i) => {
           if (state.eq.bands[i] != null) {
             s.value = state.eq.bands[i];
-            setMiniEqVisual(i, Number(state.eq.bands[i]));
+            updateRangeFill(s);
           }
         });
       }
@@ -191,6 +174,7 @@
   const EXPAND_THRESHOLD = 260;
   function updateExpanded() {
     panelEl.classList.toggle('expanded', window.innerHeight >= EXPAND_THRESHOLD);
+    syncMiniSliderSizes(); // the eq-mini area's rendered height just changed (or became visible)
   }
   window.addEventListener('resize', updateExpanded);
   updateExpanded();
@@ -198,4 +182,5 @@
   updateRangeFill(volume);
   updateRangeFill(seekBar);
   updateRangeFill(miniReverb);
+  miniSliders.forEach(updateRangeFill);
 })();

@@ -198,60 +198,25 @@ input[type="range"]::-webkit-slider-runnable-track {
   color: color-mix(in srgb, var(--color-text) 45%, transparent);
 }
 
-/* Same hand-drawn slider as the main window's .eq-slider-* (see the note in
-   src/renderer/style.css) -- a real, invisible <input type="range"> handles
-   interaction; the visible track/fill/thumb are plain divs we position
-   ourselves in setMiniEqVisual() below, so they always use our own solid
-   colors and stay identical to the main window's EQ regardless of what's
-   behind this semi-transparent overlay window. */
+/* Same technique as the main window's .eq-slider-wrap (see the note in
+   src/renderer/style.css): a real, fully native <input type="range">
+   rotated with a plain CSS transform, not styled-invisible-and-drawn-over
+   or rotated via writing-mode — both of those broke actual dragging. The
+   wrap's height is flexible (the panel can be resized), so the input's
+   pre-rotation width — which becomes its vertical length — is set in JS
+   (syncMiniSliderSizes() in overlay.js) to match the wrap's rendered
+   height, instead of a fixed px value like the main window uses. */
 .eq-mini-slider-wrap {
   position: relative;
   flex: 1;
   min-height: 24px;
   width: 100%;
-  display: flex;
-  justify-content: center;
 }
-.eq-mini-track {
-  position: relative;
-  width: 5px;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--color-neutral-900);
-  box-shadow: inset 0 0 0 1px var(--color-divider);
-}
-.eq-mini-fill {
+.eq-mini-slider-wrap input[type="range"] {
   position: absolute;
-  left: 0;
-  width: 100%;
-  border-radius: 3px;
-  background: var(--color-accent);
-}
-.eq-mini-thumb {
-  position: absolute;
+  top: 50%;
   left: 50%;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  border: 2px solid var(--color-surface);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 65%, transparent);
-  transform: translate(-50%, 50%);
-  pointer-events: none;
-}
-.eq-mini-band input[type="range"] {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  writing-mode: vertical-lr;
-  direction: rtl;
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-  opacity: 0;
-  cursor: pointer;
+  transform: translate(-50%, -50%) rotate(-90deg);
 }
 
 .eq-mini-reverb {

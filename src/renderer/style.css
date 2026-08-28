@@ -430,64 +430,28 @@ input[type="range"]::-webkit-slider-runnable-track {
 .eq-band .eq-val { font-size: 10px; color: var(--color-accent-300); white-space: nowrap; }
 .eq-band .eq-freq { font-size: 10px; color: color-mix(in srgb, var(--color-text) 42%, transparent); }
 
-/* Fully custom vertical EQ slider: a real <input type="range"> handles drag/
-   keyboard interaction but is invisible, stacked over a decorative track +
-   fill + circular thumb that we position by hand in JS (see setEqVisual() in
-   renderer.js). Built this way — instead of styling the native input
-   directly — because native vertical sliders (both -webkit-appearance:
-   slider-vertical and writing-mode rotation) render their unfilled track
-   using whatever the OS theme happens to supply, which on a semi-transparent
-   overlay window over a light background made it nearly invisible; a hand-
-   drawn track always uses our own solid color regardless of what's behind
-   the window. The fill is anchored at 0dB (the center), matching how a real
-   EQ shows a boost as a bar growing up and a cut as one growing down. */
+/* Vertical EQ slider: a REAL, fully native <input type="range"> — same
+   circular thumb + --fill gradient as every other slider in the app (the
+   shared input[type="range"] rules below) — just rotated 90° with a plain
+   CSS transform. Earlier attempts styled the input as invisible and drawn-
+   over (custom track/fill/thumb divs), or used writing-mode to rotate it
+   natively; both looked right but broke actual dragging, because neither
+   Chromium build here tracked pointer position correctly against the
+   rotated/invisible hit area. transform:rotate() doesn't have that problem —
+   the browser still hit-tests drag position correctly against a CSS-rotated
+   element, and it's the same input the mouse/keyboard already know how to
+   drive, so nothing has to be reimplemented. See PROJECT_SPEC.md §4.12. */
 .eq-slider-wrap {
   position: relative;
   width: 100%;
   height: 118px;
-  display: flex;
-  justify-content: center;
 }
-.eq-slider-track {
-  position: relative;
-  width: 6px;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--color-neutral-900);
-  box-shadow: inset 0 0 0 1px var(--color-divider);
-}
-.eq-slider-fill {
+.eq-slider-wrap input[type="range"] {
   position: absolute;
-  left: 0;
-  width: 100%;
-  border-radius: 3px;
-  background: var(--color-accent);
-}
-.eq-slider-thumb {
-  position: absolute;
+  top: 50%;
   left: 50%;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  border: 2px solid var(--color-surface);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 65%, transparent);
-  transform: translate(-50%, 50%);
-  pointer-events: none;
-}
-.eq-slider-input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  writing-mode: vertical-lr;
-  direction: rtl;
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-  opacity: 0;
-  cursor: pointer;
+  width: 118px;
+  transform: translate(-50%, -50%) rotate(-90deg);
 }
 
 .reverb-slider {
