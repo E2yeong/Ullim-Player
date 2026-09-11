@@ -192,6 +192,67 @@ function getMusicMetadata() {
   return _mm;
 }
 
+// ---------- Dynamic color theme (§4.17) ----------
+// Computed here rather than in the renderer: nativeImage.toBitmap() gives
+// synchronous, reliable pixel access, whereas the renderer-side equivalent
+// (draw to <canvas>, HTMLImageElement.decode()) turned out to hang/fail
+// intermittently in this environment's rendering pipeline. Doing the average
+// once, server-side, alongside the picture read is also just less work overall.
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d !== 0) {
+    s = d / (1 - Math.abs(2 * l - 1));
+    switch (max) {
+      case r: h = ((g - b) / d) % 6; break;
+      case g: h = (b - r) / d + 2; break;
+      default: h = (r - g) / d + 4;
+    }
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return [h, s, l];
+}
+function hslToRgb(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) };
+}
+
+// Keeps hue but reins in saturation/lightness so a near-black or neon-bright
+// cover doesn't produce an ambient wash that's invisible or garish against
+// the dark Nocturne background.
+function clampThemeColor(r, g, b) {
+  const [h, s, l] = rgbToHsl(r, g, b);
+  return hslToRgb(h, Math.min(Math.max(s, 0.35), 0.62), Math.min(Math.max(l, 0.32), 0.5));
+}
+
+function extractThemeColor(img) {
+  try {
+    const { width, height } = img.getSize();
+    if (!width || !height) return null;
+    // downsample for a fast, cheap average — this doesn't need to be exact
+    const small = Math.max(width, height) > 48
+      ? (width >= height ? img.resize({ width: 48 }) : img.resize({ height: 48 }))
+      : img;
+    const bitmap = small.toBitmap(); // BGRA, per Electron's native pixel order
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < bitmap.length; i += 4) {
+      b += bitmap[i]; g += bitmap[i + 1]; r += bitmap[i + 2]; n++;
+    }
+    if (!n) return null;
+    return clampThemeColor(r / n, g / n, b / n);
+  } catch {
+    return null;
+  }
+}
+
 async function readTrackMetadata(trackPath, wantPicture) {
   const mm = getMusicMetadata();
   const { common, format } = await mm.parseFile(trackPath, {
@@ -200,13 +261,15 @@ async function readTrackMetadata(trackPath, wantPicture) {
   });
 
   let picture = null;
+  let themeColor = null;
   if (wantPicture && common.picture && common.picture[0]) {
     try {
       const pic = common.picture[0];
       let img = nativeImage.createFromBuffer(Buffer.from(pic.data));
       if (!img.isEmpty()) {
+        themeColor = extractThemeColor(img);
         // cap the longest side so the data URL sent over IPC (and held in the
-        // renderer) stays small — 600px is plenty for the stage + colour sampling
+        // renderer) stays small — 600px is plenty for the stage
         const { width, height } = img.getSize();
         if (Math.max(width, height) > 600) {
           img = width >= height ? img.resize({ width: 600 }) : img.resize({ height: 600 });
@@ -225,6 +288,7 @@ async function readTrackMetadata(trackPath, wantPicture) {
     albumartist: common.albumartist || null,
     year: common.year || null,
     trackNo: (common.track && common.track.no) || null,
+    themeColor,
     durationSec: format.duration || null,
     picture
   };

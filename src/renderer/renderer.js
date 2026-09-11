@@ -312,6 +312,62 @@
     updatePresetButtons();
   }
 
+  // ---------- Dynamic color theme (from the playing track's album art) ----------
+  // The actual pixel averaging + HSL clamp happens in the main process (see
+  // main.js's extractThemeColor(), returned as read-metadata's `themeColor`)
+  // — nativeImage.toBitmap() there is synchronous and reliable, whereas the
+  // renderer-side equivalent (<canvas> + HTMLImageElement.decode()) turned
+  // out to hang/reject intermittently in this app's rendering pipeline. This
+  // half just applies the already-computed {r,g,b} to *ambient* surfaces —
+  // the stage backdrop/glow and the waveform's own palette — never to
+  // interactive chrome (buttons, sliders, tabs, the active-row highlight).
+  // Those stay the fixed Nocturne accent so controls read consistently no
+  // matter what art is on screen; only the mood around the art shifts.
+  let currentThemeColor = null; // {r,g,b} or null (falls back to the static purple everywhere)
+
+  function lighten(rgb, amt) {
+    return { r: rgb.r + (255 - rgb.r) * amt, g: rgb.g + (255 - rgb.g) * amt, b: rgb.b + (255 - rgb.b) * amt };
+  }
+
+  // Waveform draw colors — module-level so drawWaveform() (below) doesn't
+  // need to know whether a theme is active; updateWaveformPalette() keeps
+  // them in sync with currentThemeColor.
+  const DEFAULT_WAVE_TOP = 'rgba(210, 206, 253, 0.6)';
+  const DEFAULT_WAVE_BOTTOM = 'rgba(145, 132, 217, 0.05)';
+  const DEFAULT_WAVE_GLOW = 'rgba(145, 132, 217, 0.5)';
+  let waveGradientTop = DEFAULT_WAVE_TOP;
+  let waveGradientBottom = DEFAULT_WAVE_BOTTOM;
+  let waveGlowColor = DEFAULT_WAVE_GLOW;
+
+  function updateWaveformPalette(rgb) {
+    if (!rgb) {
+      waveGradientTop = DEFAULT_WAVE_TOP;
+      waveGradientBottom = DEFAULT_WAVE_BOTTOM;
+      waveGlowColor = DEFAULT_WAVE_GLOW;
+      return;
+    }
+    const light = lighten(rgb, 0.35);
+    waveGradientTop = `rgba(${light.r}, ${light.g}, ${light.b}, 0.6)`;
+    waveGradientBottom = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.05)`;
+    waveGlowColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`;
+  }
+
+  // Sets/clears the CSS custom properties the stage backdrop reads
+  // (.cover-art gradient, .stage ambient glow — see style.css) and keeps the
+  // waveform canvas palette in sync. null resets everything to the static look.
+  function applyThemeColor(rgb) {
+    currentThemeColor = rgb;
+    const root = document.documentElement.style;
+    if (rgb) {
+      root.setProperty('--dyn-tint', `rgb(${rgb.r} ${rgb.g} ${rgb.b})`);
+      root.setProperty('--dyn-glow', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.55)`);
+    } else {
+      root.removeProperty('--dyn-tint');
+      root.removeProperty('--dyn-glow');
+    }
+    updateWaveformPalette(rgb);
+  }
+
   // ---------- Waveform visualizer ----------
   // A persistent horizontal waveform (not transient ripples) drawn from the
   // analyser's time-domain data. Each of WAVE_POINTS buckets holds an
@@ -399,10 +455,10 @@
     rippleCtx.closePath();
 
     const gradient = rippleCtx.createLinearGradient(0, 0, 0, baseline);
-    gradient.addColorStop(0, 'rgba(210, 206, 253, 0.6)');
-    gradient.addColorStop(1, 'rgba(145, 132, 217, 0.05)');
+    gradient.addColorStop(0, waveGradientTop);
+    gradient.addColorStop(1, waveGradientBottom);
     rippleCtx.fillStyle = gradient;
-    rippleCtx.shadowColor = 'rgba(145, 132, 217, 0.5)';
+    rippleCtx.shadowColor = waveGlowColor;
     rippleCtx.shadowBlur = 16;
     rippleCtx.fill();
 
@@ -749,6 +805,7 @@
       albumArtBgEl.src = m.picture;
       albumArtEl.classList.remove('hidden');
       albumArtBgEl.classList.remove('hidden');
+      applyThemeColor(m.themeColor || null); // pre-computed in the main process, see main.js's extractThemeColor()
     }
   }
 
@@ -757,6 +814,7 @@
     albumArtBgEl.classList.add('hidden');
     albumArtEl.removeAttribute('src');
     albumArtBgEl.removeAttribute('src');
+    applyThemeColor(null); // no art showing -> back to the static palette
   }
 
   // ---------- Library / playlists ----------

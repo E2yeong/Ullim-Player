@@ -114,6 +114,35 @@ Music_pro/                # 로컬 프로젝트 폴더명(디스크상 이름). 
     아닐 수 있어 혼란스러움).
 - **세션 전용**: `state.filterQuery`는 설정 파일에 저장하지 않음 — 검색창은 매번 비어서 시작.
 
+### 4.17 다이나믹 컬러 테마 (앨범아트 기반)
+
+- **추출 위치 — 반드시 메인 프로세스**: 처음엔 렌더러에서 `<canvas>` + `HTMLImageElement.decode()`로
+  구현했으나, 이 앱의 렌더링 파이프라인에서 `decode()`가 간헐적으로 멈추거나("The source image
+  cannot be decoded") 그냥 응답을 안 하는 문제가 있었다 — 트랙이 빠르게 바뀔 때뿐 아니라 유휴
+  상태에서도 재현됨(§7의 "실제 디스플레이 세션 없음" 환경 제약과 같은 계열). `nativeImage.toBitmap()`은
+  동기적이고 안정적이라, 추출 전체를 `read-metadata`가 앨범아트를 읽는 그 자리(main.js)에서 끝내고
+  `{r,g,b}`를 `themeColor` 필드로 같이 반환하도록 옮겨서 해결 — 렌더러는 그 값을 그대로 CSS 변수에
+  꽂기만 한다.
+- **버그였던 것 — BGRA vs RGBA**: 디버깅 중 "빨간" 테스트 이미지가 파랗게 추출되는 것처럼 보인
+  순간이 있었는데, 실제 원인은 `nativeImage.createFromBuffer(buf, {width,height})`가 원시 버퍼를
+  **BGRA**로 해석한다는 점(RGBA 아님) — 테스트 픽스처를 RGBA로 채워서 생긴 착시였고, 실제
+  `extractThemeColor()`는 `toBitmap()`이 돌려주는 BGRA 순서를 이미 올바르게 반영하고 있었다.
+  (`buf[i]=B, buf[i+1]=G, buf[i+2]=R`.)
+- **추출 방법**: 앨범아트 `nativeImage`를 48px로 축소 → `toBitmap()`(BGRA) 순회하며 단순 평균 →
+  `clampThemeColor()`가 RGB→HSL 변환 후 채도 35~62%, 명도 32~50%로 클램프하고 다시 RGB로 변환.
+  거의 검정이거나 네온처럼 쨍한 커버라도 은은한 앰비언트 색으로 정리되게 하려는 목적.
+- **적용 범위 — 장식 요소에만, 인터랙티브 요소는 그대로**: `--dyn-tint`/`--dyn-glow` 두 CSS 커스텀
+  프로퍼티를 `document.documentElement`에 설정 → `.cover-art`의 라디얼 그라데이션과 `.stage`의
+  앰비언트 `box-shadow` 글로우, 그리고 파형 캔버스의 그라데이션/글로우 색(`waveGradientTop/Bottom`,
+  `waveGlowColor`, `updateWaveformPalette()`)이 이 값을 읽는다. 버튼·슬라이더·탭·현재곡 강조 같은
+  인터랙티브 크롬은 의도적으로 건드리지 않음 — 추출색이 항상 예쁘게 나온다는 보장이 없어서, 어떤
+  트랙을 틀어도 조작 가능한 요소는 항상 같은 색으로 신뢰감 있게 보이도록 유지.
+  둘 다 CSS `var(--dyn-tint, <기존 고정값>)` 형태의 폴백을 가지고 있어 앨범아트가 없거나 추출 실패
+  시 자동으로 예전 모습으로 돌아간다.
+- **트랙 전환**: `loadArtForTrack()`이 그림이 있으면 `applyThemeColor(m.themeColor || null)`, 그림이
+  없거나 트랙이 바뀌면 `clearAlbumArt()`가 `applyThemeColor(null)`로 초기화. `artLoadToken`으로
+  빠른 트랙 전환 시 오래된 응답이 새 트랙의 색을 덮어쓰지 않게 방지.
+
 ### 4.2 EQ / 리버브 (Web Audio 그래프)
 신호 경로:
 ```
@@ -513,10 +542,8 @@ npx electron-builder --prepackaged "dist\win-unpacked" --win nsis
 - ~~멀티 재생목록~~ — 완료 (§4.15).
 - ~~실시간 곡 검색~~ — 완료 (§4.16).
 - ~~UI/UX 시인성~~ — 완료 (현재 곡 강조/보조 텍스트 대비/폰트·간격, §4.1 참고).
-- **④ UI/UX 시인성**: 현재 트랙 강조 강화, 폰트 가독성·항목 간격.
-- **⑤ 다이나믹 컬러 테마**: 재생 중 앨범아트 주요 색 추출(§4.14의 `#albumArt`가 이미 픽셀 소스로
-  준비됨) → 배경 그라데이션·포인트 컬러에 반영.
-- **⑥ 오버레이 ↔ 작업표시줄 모드 전환**: 플로팅 미니 위젯 vs 작업표시줄 툴바 모드 토글.
+- ~~다이나믹 컬러 테마~~ — 완료 (§4.17).
+- **⑥ 오버레이 ↔ 작업표시줄 모드 전환 (다음 작업 대상)**: 플로팅 미니 위젯 vs 작업표시줄 툴바 모드 토글.
 - **⑦ 오디오 엔진 고도화**: 지금 컨볼버는 절차적 노이즈 임펄스(`buildImpulseResponse`) — 실제 IR
   샘플(.wav) 리버브로 교체, 트랙 전환 시 스마트 크로스페이드.
 - 폴더 통째로 추가 (재귀적으로 오디오 파일 스캔)
