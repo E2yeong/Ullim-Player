@@ -26,6 +26,7 @@
     playlists: [],
     activePlaylistId: 'library',
     currentPath: null,
+    filterQuery: '',   // session-only (not persisted); filters the current view's rows
     tracks: [],
     currentIndex: -1,
     repeatMode: 'off',  // off -> all -> one
@@ -47,6 +48,8 @@
   const albumArtBgEl = document.getElementById('albumArtBg');
   const playlistEl = document.getElementById('playlist');
   const playlistTabsEl = document.getElementById('playlistTabs');
+  const searchInput = document.getElementById('searchInput');
+  const searchClear = document.getElementById('searchClear');
   const listTitleEl = document.getElementById('listTitle');
   const trackCountEl = document.getElementById('trackCount');
   const trackTitle = document.getElementById('trackTitle');
@@ -965,14 +968,28 @@
     if (openRowMenu && !openRowMenu.contains(e.target)) closeRowMenu();
   });
 
+  // Quick filter over the currently-viewed list (library or a playlist) —
+  // matches the same title/artist you'd see in the row, so it works whether
+  // or not a track has ID3 tags. Purely a view filter: it doesn't touch
+  // state.tracks, playback, or what next/prev traverse.
+  function trackMatchesQuery(track, q) {
+    const haystack = [track.name, track.meta && track.meta.title, track.meta && track.meta.artist, track.meta && track.meta.album]
+      .filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(q);
+  }
+
   function renderPlaylist() {
     const pl = activePlaylist();
     listTitleEl.textContent = pl ? pl.name : '전체 곡';
-    trackCountEl.textContent = state.tracks.length + '곡';
     btnClearList.textContent = pl ? '목록 비우기' : '전체 삭제';
 
+    const q = state.filterQuery.trim().toLowerCase();
+    const visible = q ? state.tracks.filter((t) => trackMatchesQuery(t, q)) : state.tracks;
+    trackCountEl.textContent = q ? `${visible.length} / ${state.tracks.length}곡` : `${state.tracks.length}곡`;
+
     playlistEl.innerHTML = '';
-    state.tracks.forEach((track, i) => {
+    visible.forEach((track) => {
+      const i = state.tracks.indexOf(track); // real index — for loadTrack/removeTrack, which don't know about the filter
       const li = document.createElement('li');
       if (i === state.currentIndex) li.classList.add('active');
       li.dataset.path = track.path;
@@ -1028,8 +1045,10 @@
       li.appendChild(remove);
       li.addEventListener('click', () => loadTrack(i, true));
 
-      // drag to reorder — only meaningful inside a user playlist
-      if (pl) {
+      // drag to reorder — only inside a user playlist, and only with no
+      // filter active (reordering a filtered-down view would be confusing:
+      // rows adjacent on screen aren't necessarily adjacent underneath)
+      if (pl && !q) {
         li.draggable = true;
         li.addEventListener('dragstart', (e) => {
           li.classList.add('dragging');
@@ -1560,6 +1579,22 @@
   });
 
   btnClearList.addEventListener('click', clearPlaylist);
+
+  searchInput.addEventListener('input', () => {
+    state.filterQuery = searchInput.value;
+    searchClear.hidden = !searchInput.value;
+    renderPlaylist();
+  });
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && searchInput.value) { e.stopPropagation(); searchClear.click(); }
+  });
+  searchClear.addEventListener('click', () => {
+    searchInput.value = '';
+    state.filterQuery = '';
+    searchClear.hidden = true;
+    renderPlaylist();
+    searchInput.focus();
+  });
 
   btnPlay.addEventListener('click', togglePlay);
   btnNext.addEventListener('click', () => playNext(false));

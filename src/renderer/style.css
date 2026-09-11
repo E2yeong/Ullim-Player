@@ -112,6 +112,43 @@ h6 {
   display: flex;
   flex-direction: column;
 }
+/* ---------- Search (filters the currently viewed list, library or playlist) ---------- */
+.search-row {
+  flex: none;
+  margin: var(--space-3) var(--space-4) 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-divider);
+  background: color-mix(in srgb, var(--color-bg) 55%, transparent);
+}
+.search-row:focus-within { border-color: var(--color-accent); }
+.search-row svg { width: 14px; height: 14px; flex: none; color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+.search-row input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+}
+.search-row input::placeholder { color: color-mix(in srgb, var(--color-text) 38%, transparent); }
+.search-clear {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 3px;
+  cursor: pointer;
+}
+.search-clear:hover { color: var(--color-text); }
+
 .sidebar-header { padding: var(--space-4) var(--space-4) var(--space-3); }
 .sidebar-header h6 { margin-bottom: var(--space-3); }
 .sidebar-actions { display: flex; gap: var(--space-2); }
