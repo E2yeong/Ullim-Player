@@ -7,6 +7,12 @@
   'use strict';
 
   const panelEl = document.querySelector('.panel');
+  // Which window shape main.js built this as (§4.18) — 'floating' (the
+  // resizable widget, default) or 'bar' (fixed strip along the bottom of the
+  // screen). Read from the URL rather than IPC since it's fixed for the
+  // whole life of this window and main.js already knows it at load time.
+  const mode = new URLSearchParams(window.location.search).get('mode') === 'bar' ? 'bar' : 'floating';
+  panelEl.dataset.mode = mode;
   const titleEl = document.getElementById('title');
   const dotEl = document.querySelector('.dot');
   const btnPlay = document.getElementById('btnPlay');
@@ -170,9 +176,13 @@
     window.overlayApi.sendCommand({ type: 'eq-reverb', value: Number(miniReverb.value) });
   });
 
-  // reveal the mini EQ panel once the user resizes the window tall enough for it
+  // Reveal the mini EQ panel once the user resizes the window tall enough
+  // for it. Bar mode is a fixed-height strip with no room for it at all
+  // (see .panel[data-mode="bar"] .eq-mini in overlay.css), so this is
+  // floating-mode-only.
   const EXPAND_THRESHOLD = 260;
   function updateExpanded() {
+    if (mode === 'bar') return;
     panelEl.classList.toggle('expanded', window.innerHeight >= EXPAND_THRESHOLD);
     syncMiniSliderSizes(); // the eq-mini area's rendered height just changed (or became visible)
   }

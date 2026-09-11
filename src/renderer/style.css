@@ -775,6 +775,29 @@ input[type="range"]::-webkit-slider-runnable-track {
 .toggle-switch.on { border-color: var(--color-accent); background: var(--color-accent-700); }
 .toggle-switch.on .knob { background: var(--color-accent-200); transform: translateX(18px); }
 
+/* Two-way choice (not a boolean on/off) — e.g. 오버레이 형태 in §4.18 */
+.segmented {
+  flex: none;
+  display: flex;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+}
+.segmented-btn {
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  font-family: var(--font-heading);
+  font-size: 12px;
+  padding: 7px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.segmented-btn:hover { color: var(--color-text); }
+.segmented-btn.on { background: var(--color-accent-700); color: var(--color-text); }
+
 .settings-footer {
   flex: none;
   display: flex;

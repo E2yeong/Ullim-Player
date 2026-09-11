@@ -466,44 +466,63 @@ function getOverlayBounds() {
   return bounds;
 }
 
+// A full-width strip pinned to the bottom of the work area — the "작업표시줄
+//모드" alternative to the floating widget (§4.18). Not a real Windows AppBar
+// (Windows 11 has all but removed custom-toolbar docking from the taskbar
+// itself, and there's no stable Electron API for it); this just sits right
+// above the real taskbar, which reads the same at a glance without touching
+// undocumented shell APIs.
+const BAR_HEIGHT = 64;
+
+function getBarBounds() {
+  const area = screen.getPrimaryDisplay().workArea;
+  return { x: area.x, y: area.y + area.height - BAR_HEIGHT, width: area.width, height: BAR_HEIGHT };
+}
+
 function createOverlayWindow() {
-  const bounds = getOverlayBounds();
+  const barMode = readSettingsFile().overlayMode === 'bar';
+  const bounds = barMode ? getBarBounds() : getOverlayBounds();
 
   overlayWindow = new BrowserWindow({
     ...bounds,
-    minWidth: OVERLAY_MIN_WIDTH,
-    minHeight: OVERLAY_MIN_HEIGHT,
-    maxWidth: OVERLAY_MAX_WIDTH,
-    maxHeight: OVERLAY_MAX_HEIGHT,
+    minWidth: barMode ? undefined : OVERLAY_MIN_WIDTH,
+    minHeight: barMode ? undefined : OVERLAY_MIN_HEIGHT,
+    maxWidth: barMode ? undefined : OVERLAY_MAX_WIDTH,
+    maxHeight: barMode ? undefined : OVERLAY_MAX_HEIGHT,
     frame: false,
-    resizable: true,
-    movable: true,
+    resizable: !barMode,
+    movable: !barMode,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
     transparent: true,
     backgroundColor: '#00000000',
-    hasShadow: true,
+    hasShadow: !barMode,
     alwaysOnTop: true,
     webPreferences: { preload: path.join(__dirname, 'preload-overlay.js'), ...SECURE_WEB_PREFERENCES }
   });
 
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  overlayWindow.loadFile(path.join(__dirname, 'overlay', 'index.html'));
+  overlayWindow.loadFile(path.join(__dirname, 'overlay', 'index.html'), { query: { mode: barMode ? 'bar' : 'floating' } });
 
+  // Bar mode is a fixed strip recomputed from the current display every time
+  // it opens — nothing to remember. The floating widget keeps its
+  // draggable/resizable bounds across sessions, same as before.
   let boundsSaveTimer = null;
-  const scheduleBoundsSave = () => {
-    clearTimeout(boundsSaveTimer);
-    boundsSaveTimer = setTimeout(() => {
-      if (overlayWindow && !overlayWindow.isDestroyed()) {
-        writeSettingsFile({ overlayBounds: overlayWindow.getBounds() });
-      }
-    }, 400);
-  };
-  overlayWindow.on('resize', scheduleBoundsSave);
-  overlayWindow.on('move', scheduleBoundsSave);
+  if (!barMode) {
+    const scheduleBoundsSave = () => {
+      clearTimeout(boundsSaveTimer);
+      boundsSaveTimer = setTimeout(() => {
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+          writeSettingsFile({ overlayBounds: overlayWindow.getBounds() });
+        }
+      }, 400);
+    };
+    overlayWindow.on('resize', scheduleBoundsSave);
+    overlayWindow.on('move', scheduleBoundsSave);
+  }
 
   overlayWindow.on('closed', () => {
     clearTimeout(boundsSaveTimer);

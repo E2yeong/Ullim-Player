@@ -232,3 +232,38 @@ input[type="range"]::-webkit-slider-runnable-track {
 .eq-mini-reverb input[type="range"] {
   flex: 1;
 }
+
+/* ---------- Bar mode (§4.18) ----------
+   A fixed-height strip spanning the whole screen width, pinned to the
+   bottom of the work area by main.js's getBarBounds() — the alternative to
+   the floating widget above. Not resizable/movable, so this is a pure
+   reflow: the same three rows (title, seek, transport+volume) become
+   side-by-side flex items instead of stacked ones. No EQ here — 64px isn't
+   enough room to make the mini EQ usable, and the window can't grow to fit
+   it since bar mode is fixed-size. */
+.panel[data-mode="bar"] {
+  flex-direction: row;
+  align-items: center;
+  gap: 20px;
+  padding: 0 18px;
+  border-radius: 0;
+  border-width: 1px 0 0 0;
+}
+.panel[data-mode="bar"] .drag-bar {
+  flex: 0 1 260px;
+  min-width: 100px;
+}
+.panel[data-mode="bar"] .progress-row {
+  flex: 1 1 auto;
+  min-width: 140px;
+}
+.panel[data-mode="bar"] .row {
+  flex: 0 0 auto;
+}
+.panel[data-mode="bar"] .volume {
+  flex: 0 0 130px;
+}
+.panel[data-mode="bar"] .eq-mini,
+.panel[data-mode="bar"] .resize-grip {
+  display: none !important;
+}

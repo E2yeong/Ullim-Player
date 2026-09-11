@@ -169,6 +169,32 @@ MediaElementSource
 - 메인 창과는 IPC로 상태를 주고받음 (재생 여부, 곡 제목, 볼륨, 재생 위치/길이) — 오버레이에서 버튼을
   누르면 커맨드를 메인 창에 보내고, 메인 창이 실제 재생을 제어한 뒤 상태를 다시 브로드캐스트.
 - 진행바 포함 (탐색 가능): 메인 창이 재생 중 500ms 간격으로 `currentTime/duration`을 브로드캐스트.
+- **오버레이 형태 두 가지** — "플로팅 위젯"(위 내용, 기본값)과 "하단 바"(§4.18). 설정 페이지의
+  세그먼트 스위치로 선택하며, 다음에 오버레이를 열 때부터 적용된다.
+
+### 4.18 오버레이 — 작업표시줄 모드 ("하단 바")
+
+- **범위 판단**: 사용자가 원래 그린 그림은 진짜 Windows 작업표시줄에 박히는 커스텀 툴바(AppBar)였지만,
+  Windows 11은 이 기능(우클릭 → 도구 모음 → 새 도구 모음)을 사실상 제거했고 Electron에도 안정적인
+  대응 API가 없다 — 대신 **화면 작업 영역(`workArea`) 맨 아래에 항상 떠 있는 전체 폭 가로 바**로
+  구현. 실제 작업표시줄 위에 딱 붙어서 시각적으로는 거의 같은 느낌을 주면서, 문서화 안 된 셸 API를
+  건드리지 않는다.
+- **창 생성**: `createOverlayWindow()`가 `readSettingsFile().overlayMode === 'bar'`로 분기.
+  `getBarBounds()`가 `{x: area.x, y: area.y + area.height - 64, width: area.width, height: 64}`를
+  계산 — 항상 현재 화면 크기 기준으로 새로 계산하므로(플로팅 위젯의 `overlayBounds`처럼 저장/복원할
+  필요 없음), 모니터가 바뀌어도 다음에 열 때 알아서 맞다. `resizable: false`, `movable: false`,
+  `hasShadow: false`(전체 폭에 그림자는 안 어울림). 어느 모드로 만들지는 `overlay/index.html`을
+  `?mode=bar` 또는 `?mode=floating` 쿼리로 로드해서 렌더러 쪽에 전달.
+- **레이아웃 — 같은 HTML, CSS만 다르게**: `overlay.js`가 `location.search`에서 모드를 읽어
+  `panelEl.dataset.mode`에 반영하면, `overlay.css`의 `.panel[data-mode="bar"]`가 세로 스택
+  (`flex-direction: column`, 플로팅 기본값)을 가로(`row`)로 뒤집는다 — 원래 세로로 쌓여 있던
+  `.drag-bar`(제목) / `.progress-row`(탐색바) / `.row`(재생 버튼+볼륨)가 그대로 가로 3분할로
+  나열됨. `.eq-mini`(미니 EQ 패널)와 `.resize-grip`은 `display:none` — 64px 높이에는 EQ가 들어갈
+  자리가 없고 바 모드는 리사이즈도 안 되므로, 하단 바에서는 재생 조작만 가능(EQ는 플로팅 위젯 또는
+  메인 창에서).
+- **설정**: `state.overlayMode`(`'floating' | 'bar'`, 기본 `'floating'`)를 설정 페이지의
+  `.segmented` 두 버튼 스위치로 고름 — `trayOnClose`/`introEnabled`와 같은 패턴으로 main.js가
+  설정 파일에서 직접 읽어 다음 오버레이 생성 때 반영(이미 열려 있는 오버레이를 즉시 바꾸지는 않음).
 
 ### 4.4 시스템 트레이 (백그라운드 재생)
 - 창의 X(닫기) 버튼을 누르면 기본적으로 **종료가 아니라 숨김**(`e.preventDefault(); mainWindow.hide()`).
@@ -543,9 +569,10 @@ npx electron-builder --prepackaged "dist\win-unpacked" --win nsis
 - ~~실시간 곡 검색~~ — 완료 (§4.16).
 - ~~UI/UX 시인성~~ — 완료 (현재 곡 강조/보조 텍스트 대비/폰트·간격, §4.1 참고).
 - ~~다이나믹 컬러 테마~~ — 완료 (§4.17).
-- **⑥ 오버레이 ↔ 작업표시줄 모드 전환 (다음 작업 대상)**: 플로팅 미니 위젯 vs 작업표시줄 툴바 모드 토글.
-- **⑦ 오디오 엔진 고도화**: 지금 컨볼버는 절차적 노이즈 임펄스(`buildImpulseResponse`) — 실제 IR
-  샘플(.wav) 리버브로 교체, 트랙 전환 시 스마트 크로스페이드.
+- ~~오버레이 ↔ 작업표시줄 모드 전환~~ — 완료, 단 진짜 Windows 작업표시줄 도킹(AppBar)이 아니라
+  화면 하단에 항상 뜬 전체 폭 바로 구현 (§4.18 — 사용자 확인 하에 범위 조정).
+- **⑦ 오디오 엔진 고도화 (다음 작업 대상)**: 지금 컨볼버는 절차적 노이즈 임펄스
+  (`buildImpulseResponse`) — 실제 IR 샘플(.wav) 리버브로 교체, 트랙 전환 시 스마트 크로스페이드.
 - 폴더 통째로 추가 (재귀적으로 오디오 파일 스캔)
 - 미디어 키(키보드/이어폰 재생 버튼) 지원 — Electron `globalShortcut` 또는 `MediaSession` API
 - Windows 작업표시줄 썸네일 툴바 버튼 (`BrowserWindow.setThumbarButtons`)

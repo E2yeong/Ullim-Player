@@ -38,6 +38,7 @@
     trayOnClose: true,   // read directly by main.js's close handler via the settings file
     introEnabled: true,  // read directly by main.js before creating the splash window
     autoUpdateCheck: true, // read directly by main.js for the silent startup check
+    overlayMode: 'floating', // 'floating' | 'bar' — read directly by main.js when the overlay window opens (§4.18)
     seeking: false
   };
 
@@ -83,6 +84,7 @@
   const toggleWave = document.getElementById('toggleWave');
   const toggleLyrics = document.getElementById('toggleLyrics');
   const toggleAutoUpdate = document.getElementById('toggleAutoUpdate');
+  const overlayModeSwitch = document.getElementById('overlayModeSwitch');
 
   const eqBandsEl = document.getElementById('eqBands');
   const reverbSlider = document.getElementById('reverbSlider');
@@ -1439,6 +1441,7 @@
       trayOnClose: state.trayOnClose,
       introEnabled: state.introEnabled,
       autoUpdateCheck: state.autoUpdateCheck,
+      overlayMode: state.overlayMode,
       volume: mediaEl.volume,
       eq: {
         bands: eqSliderEls.map((s) => Number(s.value)),
@@ -1493,6 +1496,7 @@
       setToggleUI(toggleIntro, state.introEnabled);
       state.autoUpdateCheck = data.autoUpdateCheck !== false;
       setToggleUI(toggleAutoUpdate, state.autoUpdateCheck);
+      setOverlayMode(data.overlayMode === 'bar' ? 'bar' : 'floating');
       if (data.repeatMode) {
         state.repeatMode = data.repeatMode;
         updateRepeatButton();
@@ -1629,6 +1633,22 @@
     scheduleSave();
   });
   toggleWave.addEventListener('click', () => { userToggledWaveform = true; setWaveformEnabled(!state.waveformEnabled); });
+
+  // Which window createOverlayWindow() builds next time — read directly by
+  // main.js out of the settings file, same pattern as trayOnClose/introEnabled.
+  // Only takes effect on the next open, not on an already-open overlay.
+  function setOverlayMode(mode) {
+    state.overlayMode = mode;
+    overlayModeSwitch.querySelectorAll('.segmented-btn').forEach((btn) => {
+      btn.classList.toggle('on', btn.dataset.mode === mode);
+    });
+  }
+  overlayModeSwitch.querySelectorAll('.segmented-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setOverlayMode(btn.dataset.mode);
+      scheduleSave();
+    });
+  });
 
   // ---------- Event wiring ----------
   btnAddFiles.addEventListener('click', async () => {
