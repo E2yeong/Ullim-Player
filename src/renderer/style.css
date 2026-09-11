@@ -154,6 +154,22 @@ h6 {
 .sidebar-actions { display: flex; gap: var(--space-2); }
 .sidebar-actions .btn-primary { flex: 1; }
 
+/* ---------- Multi-select bulk-action bar (§4.21) ---------- */
+.selection-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 var(--space-4) var(--space-3);
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+.selection-bar[hidden] { display: none; }
+.selection-bar span { flex: 1; font-size: 12.5px; color: var(--color-accent-200); font-weight: 500; }
+.selection-bar .btn { padding: 6px 11px; font-size: 12px; }
+
 /* ---------- Playlist tabs (Library + user playlists) ---------- */
 .playlist-tabs {
   display: flex;
@@ -193,6 +209,8 @@ h6 {
 .pl-tab:hover .pl-tab-del { opacity: 1; }
 .pl-tab .pl-tab-del:hover { color: #ff8a9a; }
 .pl-tab.add-tab { color: var(--color-accent); font-size: 14px; padding: 6px 9px; }
+.pl-tab.dragging { opacity: 0.4; }
+.pl-tab.drag-over { box-shadow: inset 2px 0 0 var(--color-accent); }
 .pl-tab-edit {
   flex: none;
   width: 96px;
@@ -313,6 +331,15 @@ h6 {
   font-weight: 600;
   box-shadow: inset 3px 0 0 var(--color-accent);
 }
+/* Multi-select (§4.21) — an outline ring so it layers cleanly with .active's
+   box-shadow bar instead of fighting over the same property; a row that's
+   both playing and selected shows both effects at once. */
+.playlist li.selected {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+  outline: 1px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
+  outline-offset: -1px;
+}
+.playlist li.selected .idx { color: var(--color-accent-200); }
 .playlist li .idx {
   width: 18px;
   flex: none;

@@ -53,6 +53,10 @@
   const playlistTabsEl = document.getElementById('playlistTabs');
   const searchInput = document.getElementById('searchInput');
   const searchClear = document.getElementById('searchClear');
+  const selectionBarEl = document.getElementById('selectionBar');
+  const selectionCountEl = document.getElementById('selectionCount');
+  const btnAddSelectionToPlaylist = document.getElementById('btnAddSelectionToPlaylist');
+  const btnClearSelection = document.getElementById('btnClearSelection');
   const listTitleEl = document.getElementById('listTitle');
   const trackCountEl = document.getElementById('trackCount');
   const trackTitle = document.getElementById('trackTitle');
@@ -1077,6 +1081,8 @@
   function switchPlaylist(id) {
     if (id !== LIBRARY_ID && !state.playlists.some((p) => p.id === id)) return;
     state.activePlaylistId = id;
+    selectedPaths.clear(); // a selection made while looking at one list stays scoped to it
+    lastSelectedPath = null;
     rebuildActiveList();
     renderPlaylistTabs();
     renderPlaylist();
@@ -1111,11 +1117,29 @@
     }
   }
 
-  function addPathToPlaylist(path, playlistId) {
+  // Files one or more paths into a playlist at once — the single-track row
+  // menu and the multi-select bulk-add bar both funnel through this.
+  function addPathsToPlaylist(paths, playlistId) {
     const pl = state.playlists.find((p) => p.id === playlistId);
-    if (!pl || pl.paths.includes(path)) return;
-    pl.paths.push(path);
+    if (!pl) return;
+    let changed = false;
+    paths.forEach((p) => { if (!pl.paths.includes(p)) { pl.paths.push(p); changed = true; } });
+    if (!changed) return;
     if (state.activePlaylistId === playlistId) { rebuildActiveList(); renderPlaylist(); }
+    renderPlaylistTabs();
+    scheduleSave();
+  }
+
+  // Reorders state.playlists itself (tab order) — separate from
+  // reorderInPlaylist(), which reorders the *tracks inside* one playlist.
+  function reorderPlaylistTabs(fromId, toId) {
+    if (fromId === toId) return;
+    const from = state.playlists.findIndex((p) => p.id === fromId);
+    let to = state.playlists.findIndex((p) => p.id === toId);
+    if (from === -1 || to === -1) return;
+    const [moved] = state.playlists.splice(from, 1);
+    to = state.playlists.findIndex((p) => p.id === toId); // recompute after removal
+    state.playlists.splice(to, 0, moved);
     renderPlaylistTabs();
     scheduleSave();
   }
@@ -1144,6 +1168,27 @@
           }
         });
         tab.appendChild(del);
+
+        // Drag to reorder tabs — "전체 곡" and "+" stay fixed at the ends,
+        // only user playlists among themselves are reorderable.
+        tab.draggable = true;
+        tab.addEventListener('dragstart', (e) => {
+          tab.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', id);
+        });
+        tab.addEventListener('dragend', () => {
+          tab.classList.remove('dragging');
+          playlistTabsEl.querySelectorAll('.drag-over').forEach((el) => el.classList.remove('drag-over'));
+        });
+        tab.addEventListener('dragover', (e) => { e.preventDefault(); tab.classList.add('drag-over'); });
+        tab.addEventListener('dragleave', () => tab.classList.remove('drag-over'));
+        tab.addEventListener('drop', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          tab.classList.remove('drag-over');
+          reorderPlaylistTabs(e.dataTransfer.getData('text/plain'), id);
+        });
       }
       playlistTabsEl.appendChild(tab);
     };
@@ -1188,15 +1233,18 @@
     if (openRowMenu) { openRowMenu.remove(); openRowMenu = null; }
     document.querySelectorAll('.playlist li.menu-open').forEach((li) => li.classList.remove('menu-open'));
   }
-  function openAddToPlaylistMenu(anchorEl, li, path) {
+  // `li` is the row to mark .menu-open while the popup is up — omit (null)
+  // for the bulk-selection bar, which has no single row to highlight.
+  function openAddToPlaylistMenu(anchorEl, li, paths) {
     closeRowMenu();
-    li.classList.add('menu-open');
+    if (li) li.classList.add('menu-open');
     const menu = document.createElement('div');
     menu.className = 'row-menu';
     state.playlists.forEach((pl) => {
+      const allIn = paths.every((p) => pl.paths.includes(p));
       const b = document.createElement('button');
-      b.textContent = pl.paths.includes(path) ? `✓ ${pl.name}` : pl.name;
-      b.addEventListener('click', () => { addPathToPlaylist(path, pl.id); closeRowMenu(); });
+      b.textContent = allIn ? `✓ ${pl.name}` : pl.name;
+      b.addEventListener('click', () => { addPathsToPlaylist(paths, pl.id); closeRowMenu(); });
       menu.appendChild(b);
     });
     if (state.playlists.length) {
@@ -1209,7 +1257,7 @@
     nw.textContent = '+ 새 재생목록';
     nw.addEventListener('click', () => {
       const pl = createPlaylist('새 재생목록');
-      pl.paths.push(path);
+      paths.forEach((p) => pl.paths.push(p));
       closeRowMenu();
       switchPlaylist(pl.id);
       const tab = playlistTabsEl.querySelector('.pl-tab.active');
@@ -1237,20 +1285,74 @@
     return haystack.includes(q);
   }
 
+  // ---------- Multi-select (§4.21) ----------
+  // Session-only (not persisted) — Ctrl/Cmd-click toggles one row, Shift-click
+  // selects a range from the last-touched row, both without disturbing
+  // playback. A plain click keeps its existing meaning (play this track,
+  // clearing any selection) so single-click-to-play never changes for the
+  // common case.
+  const selectedPaths = new Set();
+  let lastSelectedPath = null;
+
+  function getVisibleTracks() {
+    const q = state.filterQuery.trim().toLowerCase();
+    return q ? state.tracks.filter((t) => trackMatchesQuery(t, q)) : state.tracks;
+  }
+
+  function updateSelectionBar() {
+    const n = selectedPaths.size;
+    selectionBarEl.hidden = n === 0;
+    if (n) selectionCountEl.textContent = `${n}곡 선택됨`;
+  }
+
+  function clearSelection() {
+    if (!selectedPaths.size) return;
+    selectedPaths.clear();
+    lastSelectedPath = null;
+    renderPlaylist();
+  }
+
+  function toggleSelection(path) {
+    if (selectedPaths.has(path)) selectedPaths.delete(path);
+    else selectedPaths.add(path);
+    lastSelectedPath = path;
+    renderPlaylist();
+  }
+
+  function selectRange(fromPath, toPath) {
+    const visible = getVisibleTracks();
+    const fromIdx = visible.findIndex((t) => t.path === fromPath);
+    const toIdx = visible.findIndex((t) => t.path === toPath);
+    if (fromIdx === -1 || toIdx === -1) { toggleSelection(toPath); return; }
+    const [lo, hi] = fromIdx < toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+    for (let i = lo; i <= hi; i++) selectedPaths.add(visible[i].path);
+    lastSelectedPath = toPath;
+    renderPlaylist();
+  }
+
+  btnClearSelection.addEventListener('click', clearSelection);
+  btnAddSelectionToPlaylist.addEventListener('click', (e) => {
+    e.stopPropagation(); // otherwise the document-level click-outside handler below closes the menu we're about to open
+    if (!selectedPaths.size) return;
+    openAddToPlaylistMenu(btnAddSelectionToPlaylist, null, [...selectedPaths]);
+  });
+
   function renderPlaylist() {
     const pl = activePlaylist();
     listTitleEl.textContent = pl ? pl.name : '전체 곡';
     btnClearList.textContent = pl ? '목록 비우기' : '전체 삭제';
 
-    const q = state.filterQuery.trim().toLowerCase();
-    const visible = q ? state.tracks.filter((t) => trackMatchesQuery(t, q)) : state.tracks;
+    const visible = getVisibleTracks();
+    const q = state.filterQuery.trim();
     trackCountEl.textContent = q ? `${visible.length} / ${state.tracks.length}곡` : `${state.tracks.length}곡`;
+    updateSelectionBar();
 
     playlistEl.innerHTML = '';
     visible.forEach((track) => {
       const i = state.tracks.indexOf(track); // real index — for loadTrack/removeTrack, which don't know about the filter
       const li = document.createElement('li');
       if (i === state.currentIndex) li.classList.add('active');
+      if (selectedPaths.has(track.path)) li.classList.add('selected');
       li.dataset.path = track.path;
 
       const idx = document.createElement('span');
@@ -1296,7 +1398,10 @@
         add.title = '재생목록에 추가';
         add.addEventListener('click', (e) => {
           e.stopPropagation();
-          openAddToPlaylistMenu(add, li, track.path);
+          // Clicking + on a track that's part of the current multi-selection
+          // files the whole selection at once, not just this one row.
+          const paths = selectedPaths.size && selectedPaths.has(track.path) ? [...selectedPaths] : [track.path];
+          openAddToPlaylistMenu(add, li, paths);
         });
       }
 
@@ -1315,7 +1420,16 @@
       li.appendChild(edit);
       if (add) li.appendChild(add);
       li.appendChild(remove);
-      li.addEventListener('click', () => loadTrack(i, true));
+      li.addEventListener('click', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          toggleSelection(track.path);
+        } else if (e.shiftKey && lastSelectedPath) {
+          selectRange(lastSelectedPath, track.path);
+        } else {
+          if (selectedPaths.size) { selectedPaths.clear(); lastSelectedPath = null; }
+          loadTrack(i, true);
+        }
+      });
 
       // drag to reorder — only inside a user playlist, and only with no
       // filter active (reordering a filtered-down view would be confusing:
@@ -1379,6 +1493,7 @@
     if (!track) return;
     const wasCurrent = i === state.currentIndex;
     const pl = activePlaylist();
+    selectedPaths.delete(track.path); // whether it left the library or just this playlist, it's no longer a valid selection target here
 
     if (pl) {
       // remove from this playlist only; the track stays in the library
@@ -1419,6 +1534,8 @@
       state.playlists = [];
       state.activePlaylistId = LIBRARY_ID;
     }
+    selectedPaths.clear();
+    lastSelectedPath = null;
     rebuildActiveList();
     if (state.currentIndex === -1) stopAndClearStage();
     renderPlaylist();

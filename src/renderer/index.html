@@ -50,7 +50,12 @@
             <button id="btnClearList" class="btn btn-secondary">전체 삭제</button>
           </div>
         </div>
-        <ul id="playlist" class="playlist"></ul>
+        <div class="selection-bar" id="selectionBar" hidden>
+          <span id="selectionCount">0곡 선택됨</span>
+          <button id="btnAddSelectionToPlaylist" class="btn btn-ghost">재생목록에 추가</button>
+          <button id="btnClearSelection" class="btn btn-secondary">선택 해제</button>
+        </div>
+        <ul id="playlist" class="playlist" title="클릭: 재생 · Ctrl+클릭: 선택 추가/해제 · Shift+클릭: 범위 선택"></ul>
         <div id="dropHint" class="drop-hint">여기에 mp3 / mp4 파일을 끌어다 놓으세요</div>
       </aside>
 
