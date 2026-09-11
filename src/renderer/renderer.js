@@ -12,8 +12,21 @@
   'use strict';
 
   // ---------- State ----------
+  // Library + playlists model:
+  //  - library  : every imported track object { path, name, durationSec, meta? }
+  //  - playlists : user lists [{ id, name, paths: [libraryPath, ...] }]
+  //  - activePlaylistId : 'library' or a playlist id — the list shown AND the
+  //    one next/prev traverse
+  //  - tracks   : DERIVED — the resolved active list (rebuildActiveList()).
+  //    Kept as a real array so the rest of the player code can keep indexing it.
+  //  - currentPath : stable identity of the loaded track (survives switching
+  //    playlists); currentIndex is its position within `tracks`, recomputed.
   const state = {
-    tracks: [],        // { path, name, durationSec, meta? {title,artist,album,year} }
+    library: [],
+    playlists: [],
+    activePlaylistId: 'library',
+    currentPath: null,
+    tracks: [],
     currentIndex: -1,
     repeatMode: 'off',  // off -> all -> one
     shuffle: false,
@@ -33,6 +46,8 @@
   const albumArtEl = document.getElementById('albumArt');
   const albumArtBgEl = document.getElementById('albumArtBg');
   const playlistEl = document.getElementById('playlist');
+  const playlistTabsEl = document.getElementById('playlistTabs');
+  const listTitleEl = document.getElementById('listTitle');
   const trackCountEl = document.getElementById('trackCount');
   const trackTitle = document.getElementById('trackTitle');
   const trackSub = document.getElementById('trackSub');
@@ -741,30 +756,226 @@
     albumArtBgEl.removeAttribute('src');
   }
 
+  // ---------- Library / playlists ----------
+  const LIBRARY_ID = 'library';
+
+  function genPlaylistId() {
+    return 'pl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  function activePlaylist() {
+    return state.activePlaylistId === LIBRARY_ID
+      ? null
+      : state.playlists.find((p) => p.id === state.activePlaylistId) || null;
+  }
+
+  // Rebuilds state.tracks (the resolved active list) and re-derives
+  // currentIndex from currentPath. Call after any change to library,
+  // playlists, or activePlaylistId.
+  function rebuildActiveList() {
+    const pl = activePlaylist();
+    if (!pl) {
+      state.tracks = state.library.slice();
+    } else {
+      const byPath = new Map(state.library.map((t) => [t.path, t]));
+      state.tracks = pl.paths.map((p) => byPath.get(p)).filter(Boolean);
+    }
+    state.currentIndex = state.currentPath
+      ? state.tracks.findIndex((t) => t.path === state.currentPath)
+      : -1;
+  }
+
   function addFiles(paths) {
-    let added = 0;
+    const known = new Set(state.library.map((t) => t.path));
+    const pl = activePlaylist();
+    let firstNew = null;
     for (const p of paths) {
       if (!p) continue;
-      const track = { path: p, name: baseName(p), durationSec: null };
-      state.tracks.push(track);
-      probeDuration(track);
-      queueMetaLoad(track);
-      added++;
+      if (!known.has(p)) {
+        const track = { path: p, name: baseName(p), durationSec: null };
+        state.library.push(track);
+        known.add(p);
+        probeDuration(track);
+        queueMetaLoad(track);
+        if (!firstNew) firstNew = p;
+      }
+      // when viewing a playlist, dropping files also files them into it
+      if (pl && !pl.paths.includes(p)) pl.paths.push(p);
     }
-    if (added) renderPlaylist();
+    rebuildActiveList();
+    renderPlaylist();
+    renderPlaylistTabs();
     if (state.currentIndex === -1 && state.tracks.length) {
-      loadTrack(0, false);
+      const idx = firstNew ? state.tracks.findIndex((t) => t.path === firstNew) : 0;
+      loadTrack(idx >= 0 ? idx : 0, false);
     }
     scheduleSave();
   }
 
+  function switchPlaylist(id) {
+    if (id !== LIBRARY_ID && !state.playlists.some((p) => p.id === id)) return;
+    state.activePlaylistId = id;
+    rebuildActiveList();
+    renderPlaylistTabs();
+    renderPlaylist();
+    scheduleSave();
+  }
+
+  function createPlaylist(name) {
+    const pl = { id: genPlaylistId(), name: name || '새 재생목록', paths: [] };
+    state.playlists.push(pl);
+    switchPlaylist(pl.id);
+    return pl;
+  }
+
+  function renamePlaylist(id, name) {
+    const pl = state.playlists.find((p) => p.id === id);
+    if (!pl) return;
+    pl.name = name.trim() || pl.name;
+    renderPlaylistTabs();
+    if (state.activePlaylistId === id) renderPlaylist(); // refresh the list header
+    scheduleSave();
+  }
+
+  function deletePlaylist(id) {
+    const i = state.playlists.findIndex((p) => p.id === id);
+    if (i === -1) return;
+    state.playlists.splice(i, 1);
+    if (state.activePlaylistId === id) {
+      switchPlaylist(LIBRARY_ID);
+    } else {
+      renderPlaylistTabs();
+      scheduleSave();
+    }
+  }
+
+  function addPathToPlaylist(path, playlistId) {
+    const pl = state.playlists.find((p) => p.id === playlistId);
+    if (!pl || pl.paths.includes(path)) return;
+    pl.paths.push(path);
+    if (state.activePlaylistId === playlistId) { rebuildActiveList(); renderPlaylist(); }
+    renderPlaylistTabs();
+    scheduleSave();
+  }
+
+  function renderPlaylistTabs() {
+    playlistTabsEl.innerHTML = '';
+    const mkTab = (id, name, deletable) => {
+      const tab = document.createElement('button');
+      tab.className = 'pl-tab' + (state.activePlaylistId === id ? ' active' : '');
+      const label = document.createElement('span');
+      label.className = 'pl-tab-name';
+      label.textContent = name;
+      tab.appendChild(label);
+      tab.addEventListener('click', () => switchPlaylist(id));
+      if (deletable) {
+        tab.addEventListener('dblclick', (e) => { e.stopPropagation(); beginTabRename(tab, id); });
+        const del = document.createElement('span');
+        del.className = 'pl-tab-del';
+        del.textContent = '✕';
+        del.title = '재생목록 삭제';
+        del.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const pl = state.playlists.find((p) => p.id === id);
+          if (pl && (pl.paths.length === 0 || confirm(`재생목록 "${pl.name}"을(를) 삭제할까요? (곡은 라이브러리에 남습니다)`))) {
+            deletePlaylist(id);
+          }
+        });
+        tab.appendChild(del);
+      }
+      playlistTabsEl.appendChild(tab);
+    };
+
+    mkTab(LIBRARY_ID, '전체 곡', false);
+    state.playlists.forEach((pl) => mkTab(pl.id, pl.name, true));
+
+    const add = document.createElement('button');
+    add.className = 'pl-tab add-tab';
+    add.textContent = '+';
+    add.title = '새 재생목록';
+    add.addEventListener('click', () => {
+      const pl = createPlaylist('새 재생목록');
+      const tab = playlistTabsEl.querySelector('.pl-tab.active');
+      if (tab) beginTabRename(tab, pl.id);
+    });
+    playlistTabsEl.appendChild(add);
+  }
+
+  // Turns a tab into an inline text input for (re)naming.
+  function beginTabRename(tab, id) {
+    const pl = state.playlists.find((p) => p.id === id);
+    if (!pl) return;
+    const input = document.createElement('input');
+    input.className = 'pl-tab-edit';
+    input.value = pl.name;
+    tab.replaceWith(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const commit = () => { if (done) return; done = true; renamePlaylist(id, input.value); };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      else if (e.key === 'Escape') { done = true; renderPlaylistTabs(); }
+    });
+    input.addEventListener('blur', commit);
+  }
+
+  // The little "add to playlist" popup for a library-view row.
+  let openRowMenu = null;
+  function closeRowMenu() {
+    if (openRowMenu) { openRowMenu.remove(); openRowMenu = null; }
+    document.querySelectorAll('.playlist li.menu-open').forEach((li) => li.classList.remove('menu-open'));
+  }
+  function openAddToPlaylistMenu(anchorEl, li, path) {
+    closeRowMenu();
+    li.classList.add('menu-open');
+    const menu = document.createElement('div');
+    menu.className = 'row-menu';
+    state.playlists.forEach((pl) => {
+      const b = document.createElement('button');
+      b.textContent = pl.paths.includes(path) ? `✓ ${pl.name}` : pl.name;
+      b.addEventListener('click', () => { addPathToPlaylist(path, pl.id); closeRowMenu(); });
+      menu.appendChild(b);
+    });
+    if (state.playlists.length) {
+      const sep = document.createElement('div');
+      sep.className = 'row-menu-sep';
+      menu.appendChild(sep);
+    }
+    const nw = document.createElement('button');
+    nw.className = 'row-menu-new';
+    nw.textContent = '+ 새 재생목록';
+    nw.addEventListener('click', () => {
+      const pl = createPlaylist('새 재생목록');
+      pl.paths.push(path);
+      closeRowMenu();
+      switchPlaylist(pl.id);
+      const tab = playlistTabsEl.querySelector('.pl-tab.active');
+      if (tab) beginTabRename(tab, pl.id);
+    });
+    menu.appendChild(nw);
+
+    document.body.appendChild(menu);
+    const r = anchorEl.getBoundingClientRect();
+    menu.style.left = Math.min(r.left, window.innerWidth - menu.offsetWidth - 8) + 'px';
+    menu.style.top = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8) + 'px';
+    openRowMenu = menu;
+  }
+  document.addEventListener('click', (e) => {
+    if (openRowMenu && !openRowMenu.contains(e.target)) closeRowMenu();
+  });
+
   function renderPlaylist() {
+    const pl = activePlaylist();
+    listTitleEl.textContent = pl ? pl.name : '전체 곡';
     trackCountEl.textContent = state.tracks.length + '곡';
+    btnClearList.textContent = pl ? '목록 비우기' : '전체 삭제';
 
     playlistEl.innerHTML = '';
     state.tracks.forEach((track, i) => {
       const li = document.createElement('li');
       if (i === state.currentIndex) li.classList.add('active');
+      li.dataset.path = track.path;
 
       const idx = document.createElement('span');
       idx.className = 'idx';
@@ -789,9 +1000,23 @@
       dur.className = 'dur';
       dur.textContent = track.durationSec ? fmtTime(track.durationSec) : '';
 
+      // library view: "＋" to file into a playlist; playlist view: no add button
+      if (!pl) {
+        const add = document.createElement('span');
+        add.className = 'row-btn add';
+        add.textContent = '＋';
+        add.title = '재생목록에 추가';
+        add.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openAddToPlaylistMenu(add, li, track.path);
+        });
+        li.appendChild(add);
+      }
+
       const remove = document.createElement('span');
-      remove.className = 'remove';
+      remove.className = 'row-btn remove';
       remove.textContent = '✕';
+      remove.title = pl ? '이 재생목록에서 제거' : '라이브러리에서 삭제';
       remove.addEventListener('click', (e) => {
         e.stopPropagation();
         removeTrack(i);
@@ -803,47 +1028,110 @@
       li.appendChild(remove);
       li.addEventListener('click', () => loadTrack(i, true));
 
+      // drag to reorder — only meaningful inside a user playlist
+      if (pl) {
+        li.draggable = true;
+        li.addEventListener('dragstart', (e) => {
+          li.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', track.path);
+        });
+        li.addEventListener('dragend', () => {
+          li.classList.remove('dragging');
+          playlistEl.querySelectorAll('.drag-over').forEach((el) => el.classList.remove('drag-over'));
+        });
+        li.addEventListener('dragover', (e) => { e.preventDefault(); li.classList.add('drag-over'); });
+        li.addEventListener('dragleave', () => li.classList.remove('drag-over'));
+        li.addEventListener('drop', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          li.classList.remove('drag-over');
+          reorderInPlaylist(e.dataTransfer.getData('text/plain'), track.path);
+        });
+      }
+
       playlistEl.appendChild(li);
     });
   }
 
-  function removeTrack(i) {
-    const wasCurrent = i === state.currentIndex;
-    state.tracks.splice(i, 1);
-    if (state.tracks.length === 0) {
-      state.currentIndex = -1;
-      mediaEl.removeAttribute('src');
-      trackTitle.textContent = '재생할 파일을 선택하세요';
-      trackTitle.removeAttribute('title');
-      trackSub.textContent = ' ';
-      updateCoverVisibility(true);
-      clearAlbumArt();
-      resetLyricsView();
-      broadcastState();
-    } else if (wasCurrent) {
-      const next = Math.min(i, state.tracks.length - 1);
-      loadTrack(next, true);
-    } else if (i < state.currentIndex) {
-      state.currentIndex--;
-    }
+  function reorderInPlaylist(fromPath, toPath) {
+    const pl = activePlaylist();
+    if (!pl || fromPath === toPath) return;
+    const from = pl.paths.indexOf(fromPath);
+    let to = pl.paths.indexOf(toPath);
+    if (from === -1 || to === -1) return;
+    pl.paths.splice(from, 1);
+    to = pl.paths.indexOf(toPath); // recompute after removal
+    pl.paths.splice(to, 0, fromPath);
+    rebuildActiveList();
     renderPlaylist();
     scheduleSave();
   }
 
-  function clearPlaylist() {
-    state.tracks = [];
-    state.currentIndex = -1;
+  function stopAndClearStage() {
     mediaEl.pause();
     mediaEl.removeAttribute('src');
+    state.currentPath = null;
+    state.currentIndex = -1;
     trackTitle.textContent = '재생할 파일을 선택하세요';
     trackTitle.removeAttribute('title');
     trackSub.textContent = ' ';
     updateCoverVisibility(true);
     clearAlbumArt();
     resetLyricsView();
-    renderPlaylist();
     setPlayIcon(false);
     broadcastState();
+  }
+
+  function removeTrack(i) {
+    const track = state.tracks[i];
+    if (!track) return;
+    const wasCurrent = i === state.currentIndex;
+    const pl = activePlaylist();
+
+    if (pl) {
+      // remove from this playlist only; the track stays in the library
+      const p = pl.paths.indexOf(track.path);
+      if (p !== -1) pl.paths.splice(p, 1);
+    } else {
+      // library removal — also drop it from every playlist
+      const li = state.library.findIndex((t) => t.path === track.path);
+      if (li !== -1) state.library.splice(li, 1);
+      state.playlists.forEach((p) => {
+        const j = p.paths.indexOf(track.path);
+        if (j !== -1) p.paths.splice(j, 1);
+      });
+    }
+
+    rebuildActiveList();
+
+    if (wasCurrent) {
+      if (state.tracks.length === 0) {
+        stopAndClearStage();
+      } else {
+        loadTrack(Math.min(i, state.tracks.length - 1), !mediaEl.paused);
+      }
+    }
+    renderPlaylist();
+    renderPlaylistTabs();
+    scheduleSave();
+  }
+
+  function clearPlaylist() {
+    const pl = activePlaylist();
+    if (pl) {
+      if (pl.paths.length && !confirm(`"${pl.name}" 재생목록을 비울까요? (곡은 라이브러리에 남습니다)`)) return;
+      pl.paths = [];
+    } else {
+      if (state.library.length && !confirm('라이브러리의 모든 곡과 재생목록을 삭제할까요?')) return;
+      state.library = [];
+      state.playlists = [];
+      state.activePlaylistId = LIBRARY_ID;
+    }
+    rebuildActiveList();
+    if (state.currentIndex === -1) stopAndClearStage();
+    renderPlaylist();
+    renderPlaylistTabs();
     scheduleSave();
   }
 
@@ -872,6 +1160,7 @@
     if (index < 0 || index >= state.tracks.length) return;
     state.currentIndex = index;
     const track = state.tracks[index];
+    state.currentPath = track.path;
 
     const encoded = encodeURI(track.path.replace(/\\/g, '/'));
     mediaEl.src = 'file:///' + encoded.replace(/^\/+/, '');
@@ -898,8 +1187,10 @@
   }
 
   function togglePlay() {
-    if (state.currentIndex === -1) {
-      if (state.tracks.length) loadTrack(0, true);
+    // Nothing loaded yet (or the loaded track isn't in the list being viewed
+    // and playback is stopped) — start the active list from the top.
+    if (!mediaEl.currentSrc && !mediaEl.src) {
+      if (state.tracks.length) loadTrack(state.currentIndex >= 0 ? state.currentIndex : 0, true);
       return;
     }
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
@@ -1058,8 +1349,10 @@
 
   function gatherSettings() {
     return {
-      tracks: state.tracks,
-      currentIndex: state.currentIndex,
+      library: state.library,
+      playlists: state.playlists,
+      activePlaylistId: state.activePlaylistId,
+      currentPath: state.currentPath,
       repeatMode: state.repeatMode,
       shuffle: state.shuffle,
       eqEnabled: state.eqEnabled,
@@ -1137,21 +1430,33 @@
       }
       updateRangeFill(volumeBar); // reverbSlider's fill was already set by applyReverb() above
 
-      if (Array.isArray(data.tracks) && data.tracks.length) {
-        state.tracks = data.tracks;
-        // older saves predate the duration/meta columns — backfill lazily.
-        state.tracks.forEach((t) => {
+      // Library + playlists. main.js migrates the old {tracks,currentIndex}
+      // shape to {library,playlists,currentPath} and prunes dead paths, so by
+      // here we only ever see the new shape.
+      if (Array.isArray(data.library)) {
+        state.library = data.library;
+        state.playlists = Array.isArray(data.playlists)
+          ? data.playlists.filter((p) => p && typeof p.id === 'string').map((p) => ({
+              id: p.id, name: String(p.name || '재생목록'), paths: Array.isArray(p.paths) ? p.paths.slice() : []
+            }))
+          : [];
+        state.activePlaylistId =
+          data.activePlaylistId === LIBRARY_ID || state.playlists.some((p) => p.id === data.activePlaylistId)
+            ? data.activePlaylistId : LIBRARY_ID;
+        state.currentPath = typeof data.currentPath === 'string' ? data.currentPath : null;
+
+        state.library.forEach((t) => {
           if (!t.durationSec) probeDuration(t);
           queueMetaLoad(t);
         });
+        rebuildActiveList();
+        renderPlaylistTabs();
         renderPlaylist();
-        const idx = typeof data.currentIndex === 'number' ? data.currentIndex : -1;
-        if (idx >= 0 && idx < state.tracks.length) {
-          loadTrack(idx, false);
-        }
+        if (state.currentIndex >= 0) loadTrack(state.currentIndex, false);
       }
     }
 
+    if (!state.library.length) { renderPlaylistTabs(); renderPlaylist(); }
     readyToSave = true;
   }
 
@@ -1390,5 +1695,6 @@
   [seekBar, volumeBar, reverbSlider].forEach(updateRangeFill);
   updateRepeatButton();
   updateCoverVisibility(true);
+  renderPlaylistTabs();
   restoreSettings();
 })();

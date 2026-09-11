@@ -112,10 +112,93 @@ h6 {
   display: flex;
   flex-direction: column;
 }
-.sidebar-header { padding: var(--space-6) var(--space-4) var(--space-3); }
+.sidebar-header { padding: var(--space-4) var(--space-4) var(--space-3); }
 .sidebar-header h6 { margin-bottom: var(--space-3); }
 .sidebar-actions { display: flex; gap: var(--space-2); }
 .sidebar-actions .btn-primary { flex: 1; }
+
+/* ---------- Playlist tabs (Library + user playlists) ---------- */
+.playlist-tabs {
+  display: flex;
+  gap: 4px;
+  padding: var(--space-3) var(--space-3) 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex: none;
+}
+.playlist-tabs::-webkit-scrollbar { display: none; }
+.pl-tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 160px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  font-family: var(--font-heading);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pl-tab:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.pl-tab.active { border-color: var(--color-accent); color: var(--color-accent-300); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.pl-tab .pl-tab-name { overflow: hidden; text-overflow: ellipsis; }
+.pl-tab .pl-tab-del {
+  flex: none;
+  opacity: 0;
+  font-size: 13px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+.pl-tab:hover .pl-tab-del { opacity: 1; }
+.pl-tab .pl-tab-del:hover { color: #ff8a9a; }
+.pl-tab.add-tab { color: var(--color-accent); font-size: 14px; padding: 6px 9px; }
+.pl-tab-edit {
+  flex: none;
+  width: 96px;
+  padding: 5px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-accent);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-heading);
+  font-size: 11.5px;
+}
+
+/* Small "add this track to a playlist" popup menu (rendered on <body>) */
+.row-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 150px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-neutral-700);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 4px;
+}
+.row-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: color-mix(in srgb, var(--color-text) 85%, transparent);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-menu button:hover { background: color-mix(in srgb, var(--color-accent) 14%, transparent); color: var(--color-text); }
+.row-menu .row-menu-sep { height: 1px; background: var(--color-divider); margin: 4px 0; }
+.row-menu .row-menu-new { color: var(--color-accent); }
 
 .playlist {
   list-style: none;
@@ -171,7 +254,7 @@ h6 {
   font-size: 11px;
   color: color-mix(in srgb, var(--color-text) 42%, transparent);
 }
-.playlist li .remove {
+.playlist li .row-btn {
   flex: none;
   opacity: 0;
   color: color-mix(in srgb, var(--color-text) 45%, transparent);
@@ -180,8 +263,12 @@ h6 {
   padding: 3px 5px;
   border-radius: var(--radius-sm);
 }
-.playlist li:hover .remove { opacity: 1; }
-.playlist li .remove:hover { background: rgba(255, 107, 129, 0.15); color: #ff8a9a; }
+.playlist li:hover .row-btn,
+.playlist li.menu-open .row-btn { opacity: 1; }
+.playlist li .row-btn.add:hover { background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-accent-300); }
+.playlist li .row-btn.remove:hover { background: rgba(255, 107, 129, 0.15); color: #ff8a9a; }
+.playlist li.dragging { opacity: 0.4; }
+.playlist li.drag-over { box-shadow: inset 0 2px 0 var(--color-accent); }
 
 .drop-hint {
   margin: var(--space-3) var(--space-4) var(--space-4);

@@ -62,6 +62,12 @@ function readSettingsFile() {
 
 function writeSettingsFile(partial) {
   const merged = { ...readSettingsFile(), ...partial };
+  // Once the renderer has written the library/playlists shape, drop the
+  // pre-migration keys so the shallow merge above stops carrying them.
+  if (Array.isArray(merged.library)) {
+    delete merged.tracks;
+    delete merged.currentIndex;
+  }
   try {
     fs.writeFileSync(getSettingsPath(), JSON.stringify(merged));
   } catch {
@@ -596,12 +602,35 @@ ipcMain.handle('install-update', () => {
 ipcMain.handle('load-settings', () => {
   const data = readSettingsFile();
   if (Object.keys(data).length === 0) return null;
-  if (Array.isArray(data.tracks)) {
-    const original = data.tracks;
-    const currentPath = original[data.currentIndex] ? original[data.currentIndex].path : null;
-    const validTracks = original.filter((t) => t && typeof t.path === 'string' && fs.existsSync(t.path));
-    data.tracks = validTracks;
-    data.currentIndex = currentPath ? validTracks.findIndex((t) => t.path === currentPath) : -1;
+
+  // Migrate the pre-playlists shape { tracks, currentIndex } -> { library,
+  // playlists, activePlaylistId, currentPath }.
+  if (Array.isArray(data.tracks) && !Array.isArray(data.library)) {
+    data.library = data.tracks;
+    data.playlists = Array.isArray(data.playlists) ? data.playlists : [];
+    data.activePlaylistId = 'library';
+    const cur = data.tracks[data.currentIndex];
+    data.currentPath = cur && cur.path ? cur.path : null;
+    delete data.tracks;
+    delete data.currentIndex;
+  }
+
+  // Drop the dead pre-migration keys so they don't linger in the file after
+  // writeSettingsFile()'s shallow merge.
+  delete data.tracks;
+  delete data.currentIndex;
+
+  // Drop tracks whose file is gone, then prune those paths out of every
+  // playlist and the "currently playing" pointer.
+  if (Array.isArray(data.library)) {
+    data.library = data.library.filter((t) => t && typeof t.path === 'string' && fs.existsSync(t.path));
+    const alive = new Set(data.library.map((t) => t.path));
+    if (Array.isArray(data.playlists)) {
+      data.playlists = data.playlists
+        .filter((p) => p && typeof p.id === 'string')
+        .map((p) => ({ ...p, paths: Array.isArray(p.paths) ? p.paths.filter((pp) => alive.has(pp)) : [] }));
+    }
+    if (data.currentPath && !alive.has(data.currentPath)) data.currentPath = null;
   }
   return data;
 });
