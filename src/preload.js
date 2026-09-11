@@ -20,5 +20,6 @@ contextBridge.exposeInMainWorld('api', {
   loadSettings: () => ipcRenderer.invoke('load-settings'),
   saveSettings: (data) => ipcRenderer.send('save-settings', data),
 
-  fetchLyrics: (payload) => ipcRenderer.invoke('fetch-lyrics', payload)
+  fetchLyrics: (payload) => ipcRenderer.invoke('fetch-lyrics', payload),
+  readMetadata: (payload) => ipcRenderer.invoke('read-metadata', payload)
 });

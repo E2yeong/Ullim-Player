@@ -13,7 +13,7 @@
 
   // ---------- State ----------
   const state = {
-    tracks: [],        // { path, name, durationSec }
+    tracks: [],        // { path, name, durationSec, meta? {title,artist,album,year} }
     currentIndex: -1,
     repeatMode: 'off',  // off -> all -> one
     shuffle: false,
@@ -30,6 +30,8 @@
   // ---------- Elements ----------
   const mediaEl = document.getElementById('mediaEl');
   const coverArt = document.getElementById('coverArt');
+  const albumArtEl = document.getElementById('albumArt');
+  const albumArtBgEl = document.getElementById('albumArtBg');
   const playlistEl = document.getElementById('playlist');
   const trackCountEl = document.getElementById('trackCount');
   const trackTitle = document.getElementById('trackTitle');
@@ -456,6 +458,7 @@
   let lastActiveLyricsIndex = -1;
   let lyricsLoadedPath = null;  // track path currentLyrics/lyricsView reflects, so a track change re-fetches
   let lyricsRequestToken = 0;   // bumped on every new fetch so a slow stale response can't clobber a newer one
+  let lyricsResolved = false;   // true once a fetch produced actual lyrics (synced or plain) — gates the ID3-arrival retry
 
   const LRC_TIME_TAG = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
 
@@ -544,6 +547,8 @@
       result = await window.api.fetchLyrics({
         path: track.path,
         name: track.name,
+        artist: (track.meta && track.meta.artist) || undefined,
+        title: (track.meta && track.meta.title) || undefined,
         durationSec: track.durationSec || mediaEl.duration || 0
       });
     } catch {
@@ -556,21 +561,25 @@
     }
     if (currentLyrics.length) {
       renderLyricsLines();
+      lyricsResolved = true;
     } else if (result && result.plain) {
       renderPlainLyrics(result.plain);
+      lyricsResolved = true;
     } else {
       renderLyricsLines('가사를 찾을 수 없어요');
+      lyricsResolved = false;
     }
   }
 
   // Fetches (or re-shows already-fetched) lyrics for the current track, but
   // only while the lyrics view is actually visible — so tracks are never
   // looked up over the network just because they happened to play while the
-  // lyrics panel was off.
-  function ensureLyricsLoaded() {
+  // lyrics panel was off. `force` re-fetches even for the same track (used
+  // when ID3 tags arrive after the first, filename-only attempt).
+  function ensureLyricsLoaded(force) {
     if (!state.lyricsEnabled || state.currentIndex < 0) return;
     const track = state.tracks[state.currentIndex];
-    if (lyricsLoadedPath === track.path) return;
+    if (!force && lyricsLoadedPath === track.path) return;
     lyricsLoadedPath = track.path;
     loadLyricsForTrack(track);
   }
@@ -579,6 +588,7 @@
     currentLyrics = [];
     lastActiveLyricsIndex = -1;
     lyricsLoadedPath = null;
+    lyricsResolved = false;
     lyricsRequestToken++; // invalidate any in-flight fetch for the old track
     if (state.lyricsEnabled) renderLyricsLines();
   }
@@ -629,6 +639,108 @@
     probe.src = url;
   }
 
+  // ---------- Track metadata (ID3 / MP4 / Vorbis tags) ----------
+  // Read in the main process (music-metadata) — see preload's readMetadata.
+  // Text tags are cached on the track object and persisted in the settings
+  // file so a big library isn't re-parsed on every launch; cover art is not
+  // persisted (too heavy for JSON) and is re-read on each track load.
+
+  // What to show as a track's primary line / secondary line — real tags when
+  // we have them, the filename otherwise.
+  function displayTitle(track) {
+    return (track.meta && track.meta.title) ? track.meta.title : track.name;
+  }
+  function displaySubtitle(track) {
+    if (!track.meta) return null;
+    const { artist, album } = track.meta;
+    if (!artist) return null;
+    return album ? `${artist} · ${album}` : artist;
+  }
+
+  function updateNowPlaying(track) {
+    trackTitle.textContent = displayTitle(track);
+    trackTitle.title = track.path;
+    const sub = displaySubtitle(track);
+    trackSub.textContent = sub || `트랙 ${state.currentIndex + 1} / ${state.tracks.length}`;
+  }
+
+  const pendingMetaLoads = new Set(); // track paths currently being parsed
+  let artLoadToken = 0;               // bumped per track load so a slow art read can't paint over a newer track
+
+  // Applies freshly-read text tags to a track and refreshes anything showing it.
+  function applyMeta(track, m) {
+    if (!m || m.error) return;
+    track.meta = { title: m.title || null, artist: m.artist || null, album: m.album || null, year: m.year || null };
+    if (!track.durationSec && m.durationSec) track.durationSec = m.durationSec;
+    renderPlaylist();
+    if (state.currentIndex >= 0 && state.tracks[state.currentIndex] === track) {
+      updateNowPlaying(track);
+      broadcastState();
+      if (!lyricsResolved) ensureLyricsLoaded(true); // real artist/title may now find lyrics the filename couldn't
+    }
+    scheduleSave();
+  }
+
+  // Text tags only (skipCovers) — used to fill the playlist in the background.
+  async function loadMetaForTrack(track) {
+    if (track.meta || pendingMetaLoads.has(track.path)) return;
+    pendingMetaLoads.add(track.path);
+    try {
+      const m = await window.api.readMetadata({ path: track.path, wantPicture: false });
+      applyMeta(track, m);
+    } catch {
+      // leave track.meta undefined; the UI falls back to the filename
+    } finally {
+      pendingMetaLoads.delete(track.path);
+    }
+  }
+
+  // Gate the first-launch parse storm: after a library is imported (or an
+  // older save without cached tags is loaded), every track wants its tags at
+  // once. Cap how many parse in parallel; once read, tags are cached in the
+  // settings file so this only bites on the first run.
+  const metaQueue = [];
+  let metaActive = 0;
+  function pumpMetaQueue() {
+    while (metaActive < 4 && metaQueue.length) {
+      const t = metaQueue.shift();
+      metaActive++;
+      loadMetaForTrack(t).finally(() => { metaActive--; pumpMetaQueue(); });
+    }
+  }
+  function queueMetaLoad(track) {
+    if (track.meta) return;
+    metaQueue.push(track);
+    pumpMetaQueue();
+  }
+
+  // Text tags + resized cover art — used for the track being put on the stage.
+  async function loadArtForTrack(track) {
+    const token = ++artLoadToken;
+    clearAlbumArt();
+    let m = null;
+    try {
+      m = await window.api.readMetadata({ path: track.path, wantPicture: true });
+    } catch {
+      m = null;
+    }
+    if (token !== artLoadToken) return; // a newer track has since loaded
+    if (m && !m.error && !track.meta) applyMeta(track, m);
+    if (m && m.picture) {
+      albumArtEl.src = m.picture;
+      albumArtBgEl.src = m.picture;
+      albumArtEl.classList.remove('hidden');
+      albumArtBgEl.classList.remove('hidden');
+    }
+  }
+
+  function clearAlbumArt() {
+    albumArtEl.classList.add('hidden');
+    albumArtBgEl.classList.add('hidden');
+    albumArtEl.removeAttribute('src');
+    albumArtBgEl.removeAttribute('src');
+  }
+
   function addFiles(paths) {
     let added = 0;
     for (const p of paths) {
@@ -636,6 +748,7 @@
       const track = { path: p, name: baseName(p), durationSec: null };
       state.tracks.push(track);
       probeDuration(track);
+      queueMetaLoad(track);
       added++;
     }
     if (added) renderPlaylist();
@@ -657,10 +770,20 @@
       idx.className = 'idx';
       idx.textContent = String(i + 1);
 
+      const text = document.createElement('span');
+      text.className = 'track-text';
       const name = document.createElement('span');
       name.className = 'name';
-      name.textContent = track.name;
+      name.textContent = displayTitle(track);
       name.title = track.path;
+      text.appendChild(name);
+      const subtitle = displaySubtitle(track);
+      if (subtitle) {
+        const artist = document.createElement('span');
+        artist.className = 'artist';
+        artist.textContent = subtitle;
+        text.appendChild(artist);
+      }
 
       const dur = document.createElement('span');
       dur.className = 'dur';
@@ -675,7 +798,7 @@
       });
 
       li.appendChild(idx);
-      li.appendChild(name);
+      li.appendChild(text);
       li.appendChild(dur);
       li.appendChild(remove);
       li.addEventListener('click', () => loadTrack(i, true));
@@ -691,8 +814,10 @@
       state.currentIndex = -1;
       mediaEl.removeAttribute('src');
       trackTitle.textContent = '재생할 파일을 선택하세요';
+      trackTitle.removeAttribute('title');
       trackSub.textContent = ' ';
       updateCoverVisibility(true);
+      clearAlbumArt();
       resetLyricsView();
       broadcastState();
     } else if (wasCurrent) {
@@ -711,8 +836,10 @@
     mediaEl.pause();
     mediaEl.removeAttribute('src');
     trackTitle.textContent = '재생할 파일을 선택하세요';
+    trackTitle.removeAttribute('title');
     trackSub.textContent = ' ';
     updateCoverVisibility(true);
+    clearAlbumArt();
     resetLyricsView();
     renderPlaylist();
     setPlayIcon(false);
@@ -749,9 +876,9 @@
     const encoded = encodeURI(track.path.replace(/\\/g, '/'));
     mediaEl.src = 'file:///' + encoded.replace(/^\/+/, '');
 
-    trackTitle.textContent = track.name;
-    trackSub.textContent = `트랙 ${index + 1} / ${state.tracks.length}`;
+    updateNowPlaying(track);
     updateCoverVisibility(true);
+    loadArtForTrack(track); // also backfills track.meta if it wasn't read yet
     renderPlaylist();
     resetLyricsView();
     ensureLyricsLoaded();
@@ -859,8 +986,10 @@
   // ---------- Overlay sync ----------
   function broadcastState() {
     if (!window.api.sendPlayerState) return;
+    const cur = state.currentIndex >= 0 ? state.tracks[state.currentIndex] : null;
     window.api.sendPlayerState({
-      title: state.currentIndex >= 0 ? state.tracks[state.currentIndex].name : '',
+      title: cur ? displayTitle(cur) : '',
+      artist: cur && cur.meta ? (cur.meta.artist || '') : '',
       playing: !mediaEl.paused && state.currentIndex >= 0,
       index: state.currentIndex,
       total: state.tracks.length,
@@ -1010,8 +1139,11 @@
 
       if (Array.isArray(data.tracks) && data.tracks.length) {
         state.tracks = data.tracks;
-        // older saves predate the duration column — backfill it lazily.
-        state.tracks.forEach((t) => { if (!t.durationSec) probeDuration(t); });
+        // older saves predate the duration/meta columns — backfill lazily.
+        state.tracks.forEach((t) => {
+          if (!t.durationSec) probeDuration(t);
+          queueMetaLoad(t);
+        });
         renderPlaylist();
         const idx = typeof data.currentIndex === 'number' ? data.currentIndex : -1;
         if (idx >= 0 && idx < state.tracks.length) {

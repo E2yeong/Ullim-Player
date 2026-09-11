@@ -144,13 +144,28 @@ h6 {
   color: var(--color-accent-300);
   font-size: 11px;
 }
-.playlist li .name {
+.playlist li .track-text {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.playlist li .name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.playlist li .artist {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 42%, transparent);
+}
+.playlist li.active .artist { color: color-mix(in srgb, var(--color-text) 60%, transparent); }
 .playlist li .dur {
   flex: none;
   font-size: 11px;
@@ -307,6 +322,32 @@ input[type="range"]::-webkit-slider-runnable-track {
 }
 .cover-note.faded { opacity: 0.12; }
 .cover-art.hidden { display: none; }
+
+/* Embedded album art (ID3 APIC / MP4 covr): fills the stage behind the
+   waveform canvas. `cover` crop + blurred copy behind it so non-square art
+   still fills the frame without letterbox bars. */
+.album-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.album-art-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(28px) brightness(0.45) saturate(1.2);
+  transform: scale(1.15);
+}
+/* DOM order inside .cover-art does the layering: bg img -> fg img -> waveform
+   canvas -> ♪ note, so no z-index juggling (and nothing here competes with
+   .lyrics-view / .stage-toggles, which sit above the whole group). */
+.album-art.hidden, .album-art-bg.hidden { display: none; }
+.cover-art:has(.album-art:not(.hidden)) { background: #0c0d14; }
+.cover-art:has(.album-art:not(.hidden)) .cover-note { display: none; }
 
 .ripple-canvas {
   position: absolute;

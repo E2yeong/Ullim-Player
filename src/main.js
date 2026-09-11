@@ -122,7 +122,8 @@ function writeLyricsCache(trackPath, data) {
 // Best-effort split of a "Artist - Title.ext" filename, which is the most
 // common convention for downloaded mp3s. Anything else is treated as a
 // title-only query — LRCLIB's search endpoint still does reasonably well
-// with just the title.
+// with just the title. Only used as a fallback now: real ID3 tags (read via
+// music-metadata, see readTrackMetadata below) are preferred when present.
 function parseArtistTitle(name) {
   const base = name.replace(/\.[^.]+$/, '');
   const dashSplit = base.split(/\s-\s/);
@@ -132,8 +133,13 @@ function parseArtistTitle(name) {
   return { artist: '', title: base.trim() };
 }
 
-async function queryLrclib(name, durationSec) {
-  const { artist, title } = parseArtistTitle(name);
+async function queryLrclib({ name, artist, title, durationSec }) {
+  // Prefer real tags; fill any gap from the filename.
+  if (!artist || !title) {
+    const parsed = parseArtistTitle(name || '');
+    artist = artist || parsed.artist;
+    title = title || parsed.title;
+  }
   const headers = { 'User-Agent': 'Ullim-Music-Player (personal desktop app, https://github.com/E2yeong/music-player-pro)' };
 
   // /api/get wants an exact title/artist/duration match and returns the
@@ -167,6 +173,55 @@ async function queryLrclib(name, durationSec) {
     // give up quietly; the renderer shows a "가사를 찾을 수 없어요" state either way
   }
   return null;
+}
+
+// ---------- Track metadata (ID3 / MP4 / Vorbis tags, see 'read-metadata' IPC below) ----------
+// music-metadata is required lazily so a load failure only breaks this one
+// feature instead of the whole app at startup. Text tags (title/artist/album)
+// get cached by the renderer inside the settings file; cover art is NOT cached
+// there (it would bloat the JSON badly) — it's re-read per track load.
+let _mm = null;
+function getMusicMetadata() {
+  if (!_mm) _mm = require('music-metadata');
+  return _mm;
+}
+
+async function readTrackMetadata(trackPath, wantPicture) {
+  const mm = getMusicMetadata();
+  const { common, format } = await mm.parseFile(trackPath, {
+    duration: true,
+    skipCovers: !wantPicture
+  });
+
+  let picture = null;
+  if (wantPicture && common.picture && common.picture[0]) {
+    try {
+      const pic = common.picture[0];
+      let img = nativeImage.createFromBuffer(Buffer.from(pic.data));
+      if (!img.isEmpty()) {
+        // cap the longest side so the data URL sent over IPC (and held in the
+        // renderer) stays small — 600px is plenty for the stage + colour sampling
+        const { width, height } = img.getSize();
+        if (Math.max(width, height) > 600) {
+          img = width >= height ? img.resize({ width: 600 }) : img.resize({ height: 600 });
+        }
+        picture = img.toDataURL();
+      }
+    } catch {
+      picture = null; // unreadable embedded image — just skip the art
+    }
+  }
+
+  return {
+    title: common.title || null,
+    artist: common.artist || (Array.isArray(common.artists) && common.artists[0]) || null,
+    album: common.album || null,
+    albumartist: common.albumartist || null,
+    year: common.year || null,
+    trackNo: (common.track && common.track.no) || null,
+    durationSec: format.duration || null,
+    picture
+  };
 }
 
 function createWindow(startHidden) {
@@ -562,24 +617,32 @@ ipcMain.on('save-settings', (_event, data) => {
 // line-by-line) text it should parse and scroll, vs. `plain` being untimed
 // lyrics it can only show as a static block.
 ipcMain.handle('fetch-lyrics', async (_event, payload) => {
-  const { path: trackPath, name, durationSec } = payload || {};
+  const { path: trackPath, name, artist, title, durationSec } = payload || {};
   if (!trackPath || !name) return { source: 'none', synced: false, lrc: null, plain: null };
+  const haveTags = !!(artist && title);
 
   const local = findLocalLrc(trackPath);
   if (local) return { source: 'local', synced: true, lrc: local, plain: null };
 
   const cached = readLyricsCache(trackPath);
   if (cached) {
-    if (cached.notFound) return { source: 'cache', synced: false, lrc: null, plain: null };
-    return {
-      source: 'cache',
-      synced: !!cached.syncedLyrics,
-      lrc: cached.syncedLyrics || null,
-      plain: cached.plainLyrics || null
-    };
+    if (cached.notFound) {
+      // A previous "not found" that was only a filename guess is worth retrying
+      // now that real ID3 tags are available; anything else stays cached.
+      if (!(cached.by === 'filename' && haveTags)) {
+        return { source: 'cache', synced: false, lrc: null, plain: null };
+      }
+    } else {
+      return {
+        source: 'cache',
+        synced: !!cached.syncedLyrics,
+        lrc: cached.syncedLyrics || null,
+        plain: cached.plainLyrics || null
+      };
+    }
   }
 
-  const result = await queryLrclib(name, durationSec);
+  const result = await queryLrclib({ name, artist, title, durationSec });
   if (result && (result.syncedLyrics || result.plainLyrics)) {
     writeLyricsCache(trackPath, { syncedLyrics: result.syncedLyrics || null, plainLyrics: result.plainLyrics || null });
     return {
@@ -590,8 +653,22 @@ ipcMain.handle('fetch-lyrics', async (_event, payload) => {
     };
   }
 
-  writeLyricsCache(trackPath, { notFound: true });
+  writeLyricsCache(trackPath, { notFound: true, by: haveTags ? 'id3' : 'filename' });
   return { source: 'none', synced: false, lrc: null, plain: null };
+});
+
+// ---------- IPC: track metadata ----------
+// `wantPicture` is false for the bulk playlist fill (text tags only, fast) and
+// true only for the track being loaded onto the stage (also returns resized
+// cover art as a data URL).
+ipcMain.handle('read-metadata', async (_event, payload) => {
+  const { path: trackPath, wantPicture } = payload || {};
+  if (!trackPath) return { error: 'no path' };
+  try {
+    return await readTrackMetadata(trackPath, !!wantPicture);
+  } catch (err) {
+    return { error: err && err.message ? err.message : 'metadata read failed' };
+  }
 });
 
 // ---------- IPC: splash window ----------
