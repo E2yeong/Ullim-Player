@@ -152,13 +152,15 @@ MediaElementSource
   → ConvolverNode(wetGain) ┴→ masterGain → DynamicsCompressor(리미터) → destination
 ```
 - 각 밴드 게인 범위: **-36dB ~ +36dB**
-- 리버브: `ConvolverNode.buffer`는 1.4초 길이의 랜덤 노이즈를 decay 지수로 감쇠시켜 즉석 생성(외부 IR 파일
-  없음). `wetGain`은 슬라이더 0~100%를 **그대로** wet 게인(0~1)에 매핑 (100%까지 완전 반영).
+- 리버브: `ConvolverNode.buffer`는 외부 IR 파일 없이 즉석 합성 — 어떤 공간을 합성하는지는 §4.19 참고.
+  `wetGain`은 슬라이더 0~100%를 **그대로** wet 게인(0~1)에 매핑 (100%까지 완전 반영).
   dry는 항상 0.92로 고정 — **리버브를 올려도 원음 볼륨이 줄지 않도록** 하기 위함 (초기 버전 버그: dry를
   `1 - wet*0.6`으로 깎아서 리버브 올릴수록 전체 음량이 작아지고 먹먹해졌던 문제를 고침).
 - 리미터(DynamicsCompressor): threshold -10dB, knee 4, ratio 20:1, attack 3ms, release 250ms.
   ±36dB 부스트를 여러 밴드에 동시에 걸어도 하드클리핑되지 않도록 하는 안전장치.
 - EQ 프리셋 4종(Flat/Bass Boost/Vocal/Hall Reverb)은 8개 밴드 게인 배열 + reverb% 값의 조합으로 정의.
+  **리버브 "공간"(§4.19의 room/hall/plate/cathedral)과는 독립적** — 프리셋은 EQ 커브 + 추천 wet%만
+  건드리고, 지금 골라둔 공간은 그대로 둔다(의도치 않게 같이 바뀌지 않도록).
 
 ### 4.3 오버레이(미니 플레이어)
 - 별도의 frameless, `alwaysOnTop: true` (level `'screen-saver'`), `transparent: true` BrowserWindow.
@@ -195,6 +197,55 @@ MediaElementSource
 - **설정**: `state.overlayMode`(`'floating' | 'bar'`, 기본 `'floating'`)를 설정 페이지의
   `.segmented` 두 버튼 스위치로 고름 — `trayOnClose`/`introEnabled`와 같은 패턴으로 main.js가
   설정 파일에서 직접 읽어 다음 오버레이 생성 때 반영(이미 열려 있는 오버레이를 즉시 바꾸지는 않음).
+
+### 4.19 오디오 엔진 — IR 리버브 합성 + 크로스페이드
+
+**리버브 "공간" 4종** (`REVERB_SPACES`, `buildImpulseResponse()`)
+
+- **범위 판단**: 실제 녹음된 IR 샘플(.wav)을 쓰려면 외부 다운로드 + 라이선스 확인 + 용량 증가가
+  필요해서(사용자 확인 하에) 기각 — 대신 합성 퀄리티를 올렸다. 예전 버전은 순수 노이즈를 decay
+  지수로 감쇠시킨 것뿐이라 "공간감"이 전혀 없이 뭉개진 잔향처럼 들렸다.
+- **초기 반사(early reflections)**: 디퓨즈 테일과 별도로, 처음 수십~수백 ms 안에 몇 개의 개별
+  반사음(탭)을 흩뿌려 얹는다 — 실제로 "이게 작은 방인지 큰 홀인지"를 가르는 건 매끄러운 노이즈
+  꼬리가 아니라 이 초기 반사 패턴의 개수/간격이다. 공간별 탭 개수(`erCount`)·범위(`erSpanMs`)·
+  감쇠(`erDecay`)가 다 다름. Plate는 탭이 아예 없음(금속판 특유의 처음부터 조밀하고 밝은 잔향이라
+  방 반사 패턴 자체가 없는 게 특징).
+- **주파수 의존 감쇠**: 실제 공간은 잔향이 감쇠할수록 고음이 저음보다 더 빨리 죽는다(공기/재질 흡음).
+  버퍼 전체에 걸쳐 계수가 점점 커지는 1차 저역통과(leaky integrator, `smoothed = smoothed*smoothing
+  + noise*(1-smoothing)`, `smoothing = t * darken`)를 노이즈에 그대로 적용해서 재현 — 시작은 원음
+  그대로, 끝으로 갈수록 점점 먹먹해짐.
+- **4가지 공간**: Room(0.8s, 반사 조밀) / Hall(1.8s, 중간 밀도) / Plate(1.4s, 반사 없음, 가장 밝음) /
+  Cathedral(3.2s, 반사 성김·아주 김). EQ 패널의 `#spacePicker`에서 즉시 전환(`setReverbSpace()`가
+  `convolver.buffer`를 그 자리에서 재생성 — 3초짜리도 몇 ms면 끝나서 랙 없음). `state.reverbSpace`로
+  저장, 기본값 `hall`.
+
+**크로스페이드** (`CROSSFADE_SECONDS = 3`, 기본 꺼짐)
+
+- **범위 판단**: 진짜 겹침 재생(두 트랙이 동시에 소리 나며 볼륨이 교차)을 하려면 `<video>` 엘리먼트를
+  두 개 두고 각각 독립된 `MediaElementSourceNode`+게인을 EQ 체인 앞단에서 합쳐야 한다 — 재생 엔진
+  전역에서 `mediaEl`을 직접 참조하는 수십 곳(재생/일시정지/탐색/이벤트 리스너 전부)을 "지금 활성인
+  엘리먼트가 어느 쪽인지" 알아야 하는 구조로 다시 짜야 해서, 핵심 재생 코드에 회귀 위험이 큼 —
+  사용자 확인 하에 더 안전한 방식으로 범위를 좁혔다.
+- **실제 구현 — 겹치지 않는 빠른 페이드아웃/페이드인**: 기존 단일 `mediaEl` + `masterGain` 그대로
+  두고, `masterGain.gain`을 `AudioParam` 자동화로 흔든다. 곡이 끝나기 `CROSSFADE_SECONDS`초 전부터
+  1→0으로 램프(`maybeStartCrossfadeOut()`, `timeupdate`마다 체크) → 자연스럽게 곡이 끝나
+  `playNext(true)`가 다음 곡을 로드하면 0→1로 다시 램프(`startCrossfadeIn()`). 겹쳐 들리진 않지만
+  "뚝" 끊기지 않고 부드럽게 넘어감.
+- **상태 머신**: `crossfadeState`: `'idle' | 'fading-out' | 'fading-in'`. `playNext()`가 자기가
+  트리거한 자연스러운 전환인지(`continuingCrossfade`) 판단해서 `crossfadeHandoff` 플래그를 한 번만
+  세팅 — `loadTrack()` 맨 앞의 가드(`if (crossfadeState !== 'idle' && !crossfadeHandoff)
+  cancelCrossfade()`)가 그 외의 모든 트랙 전환(재생목록 클릭, 이전/다음 버튼, 셔플, 탐색바 드래그,
+  같은 곡 처음으로 되감기)에서는 무조건 볼륨을 1로 되돌린다.
+- **함정 — `pause` 이벤트로 구분 못 함**: 곡이 자연스럽게 끝날 때도 `ended` 직전에 `pause` 이벤트가
+  먼저 뜬다. 처음엔 "그 순간 `mediaEl.ended`가 이미 true일 것"이라고 가정하고 그걸로 사용자의 수동
+  일시정지와 구분하려 했는데, 실제 이 Chromium 빌드에서는 그 가정이 안 맞아서(0.3초짜리 테스트
+  클립으로 반복 재생시키며 `masterGain.gain`을 직접 샘플링해서 발견) 페이드인이 시작되자마자
+  취소돼버리는 버그가 났다. `mediaEl.ended` 대신 `togglePlay()`가 실제로 일시정지 버튼을 눌렀을
+  때만 세팅하는 `userInitiatedPause` 플래그로 교체해서 해결.
+- **일시정지 중 문제**: `masterGain.gain`의 램프는 `AudioContext`의 시간축을 따라가지, `mediaEl`이
+  멈춰 있다고 같이 멈추지 않는다 — 그래서 페이드 도중 수동으로 일시정지했다가 한참 뒤에 다시 재생을
+  누르면 이미 게인이 0까지 다 떨어져서 무음으로 들릴 수 있음. `userInitiatedPause`가 true인
+  `pause` 이벤트는 무조건 `cancelCrossfade()`로 처리해서 방지.
 
 ### 4.4 시스템 트레이 (백그라운드 재생)
 - 창의 X(닫기) 버튼을 누르면 기본적으로 **종료가 아니라 숨김**(`e.preventDefault(); mainWindow.hide()`).
@@ -560,9 +611,9 @@ npx electron-builder --prepackaged "dist\win-unpacked" --win nsis
 
 ## 8. 향후 아이디어 (아직 미구현, 논의됨)
 
-현재 진행 순서(사용자 확인, 2026-09-10): **① ID3 태그 읽기(완료, §4.14) → ② 멀티 재생목록 →
-③ 실시간 곡 검색 → ④ UI/UX 시인성 → ⑤ 다이나믹 컬러 테마 → ⑥ 오버레이·작업표시줄 모드 전환 →
-⑦ 오디오 엔진(IR 리버브 + 크로스페이드)**. 릴리스는 이 묶음이 어느 정도 끝난 뒤 한 번에.
+진행 순서(사용자 확인, 2026-09-10): **① ID3 태그 읽기 → ② 멀티 재생목록 → ③ 실시간 곡 검색 →
+④ UI/UX 시인성 → ⑤ 다이나믹 컬러 테마 → ⑥ 오버레이·작업표시줄 모드 전환 → ⑦ 오디오 엔진(IR 리버브
++ 크로스페이드)** — **전부 완료.** 다음은 릴리스(v1.0.9 예정, 아직 미실행) 아니면 아래 항목들 중 선택.
 
 - ~~ID3 태그 읽기~~ — 완료 (§4.14). ID3 태그 **편집기**는 이번 범위에서 빠짐(읽기만).
 - ~~멀티 재생목록~~ — 완료 (§4.15).
@@ -571,8 +622,9 @@ npx electron-builder --prepackaged "dist\win-unpacked" --win nsis
 - ~~다이나믹 컬러 테마~~ — 완료 (§4.17).
 - ~~오버레이 ↔ 작업표시줄 모드 전환~~ — 완료, 단 진짜 Windows 작업표시줄 도킹(AppBar)이 아니라
   화면 하단에 항상 뜬 전체 폭 바로 구현 (§4.18 — 사용자 확인 하에 범위 조정).
-- **⑦ 오디오 엔진 고도화 (다음 작업 대상)**: 지금 컨볼버는 절차적 노이즈 임펄스
-  (`buildImpulseResponse`) — 실제 IR 샘플(.wav) 리버브로 교체, 트랙 전환 시 스마트 크로스페이드.
+- ~~오디오 엔진 고도화~~ — 완료, 단 두 항목 다 사용자 확인 하에 범위 조정됨 (§4.19): IR 리버브는
+  외부 샘플이 아니라 초기 반사+주파수 의존 감쇠를 더한 합성으로, 크로스페이드는 진짜 겹침 재생이
+  아니라 마스터 게인 페이드아웃/페이드인으로.
 - 폴더 통째로 추가 (재귀적으로 오디오 파일 스캔)
 - 미디어 키(키보드/이어폰 재생 버튼) 지원 — Electron `globalShortcut` 또는 `MediaSession` API
 - Windows 작업표시줄 썸네일 툴바 버튼 (`BrowserWindow.setThumbarButtons`)

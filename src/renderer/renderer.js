@@ -39,6 +39,8 @@
     introEnabled: true,  // read directly by main.js before creating the splash window
     autoUpdateCheck: true, // read directly by main.js for the silent startup check
     overlayMode: 'floating', // 'floating' | 'bar' — read directly by main.js when the overlay window opens (§4.18)
+    reverbSpace: 'hall',     // one of REVERB_SPACES below (declared later in this file, hence the literal here)
+    crossfadeEnabled: false, // §4.19 — fade out/in around auto-advance transitions
     seeking: false
   };
 
@@ -85,10 +87,12 @@
   const toggleLyrics = document.getElementById('toggleLyrics');
   const toggleAutoUpdate = document.getElementById('toggleAutoUpdate');
   const overlayModeSwitch = document.getElementById('overlayModeSwitch');
+  const toggleCrossfade = document.getElementById('toggleCrossfade');
 
   const eqBandsEl = document.getElementById('eqBands');
   const reverbSlider = document.getElementById('reverbSlider');
   const valReverb = document.getElementById('valReverb');
+  const spacePickerEl = document.getElementById('spacePicker');
 
   const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'mkv']);
 
@@ -181,14 +185,61 @@
   let analyserData = null; // frequency-domain samples, for the overall level
   let waveformData = null; // time-domain samples, for the waveform shape
 
-  function buildImpulseResponse(ctx, seconds, decay) {
+  // ---------- Reverb "space" presets (impulse-response synthesis) ----------
+  // No recorded/licensed IR samples are bundled (kept the whole app dependency-
+  // and download-free) — instead each space shapes a synthesized impulse with
+  // the two things that actually read as "a real place" to the ear, which a
+  // single plain noise-decay curve doesn't capture at all:
+  //  - discrete early reflections: a sparse handful of distinct echoes in the
+  //    first tens-to-hundreds of ms, before the diffuse tail. Their count/
+  //    spacing is most of what makes a "room" sound small and a "cathedral"
+  //    sound cavernous — a smooth noise tail alone sounds generic/washy.
+  //  - frequency-dependent decay: real spaces lose high frequencies faster
+  //    than low ones as the tail decays (air absorption, soft materials).
+  //    Modeled as a one-pole lowpass whose smoothing coefficient increases
+  //    across the buffer, so the tail darkens progressively instead of
+  //    decaying as flat-spectrum noise throughout.
+  const REVERB_SPACES = {
+    room: { label: 'Room', seconds: 0.8, decay: 3.4, erCount: 14, erSpanMs: 45, erDecay: 0.75, darken: 0.35 },
+    hall: { label: 'Hall', seconds: 1.8, decay: 2.6, erCount: 10, erSpanMs: 70, erDecay: 0.7, darken: 0.5 },
+    // Plate reverb is characteristically dense and bright from the very
+    // first ms (a vibrating metal plate, not a room) — no discrete taps.
+    plate: { label: 'Plate', seconds: 1.4, decay: 2.2, erCount: 0, erSpanMs: 0, erDecay: 0, darken: 0.2 },
+    cathedral: { label: 'Cathedral', seconds: 3.2, decay: 2.0, erCount: 7, erSpanMs: 120, erDecay: 0.65, darken: 0.6 }
+  };
+  const DEFAULT_REVERB_SPACE = 'hall';
+
+  function buildImpulseResponse(ctx, spaceKey) {
+    const space = REVERB_SPACES[spaceKey] || REVERB_SPACES[DEFAULT_REVERB_SPACE];
     const rate = ctx.sampleRate;
-    const length = Math.max(1, Math.floor(rate * seconds));
+    const length = Math.max(1, Math.floor(rate * space.seconds));
     const impulse = ctx.createBuffer(2, length, rate);
+
     for (let ch = 0; ch < 2; ch++) {
       const data = impulse.getChannelData(ch);
+
+      // diffuse tail: decaying noise, progressively darkened via a one-pole
+      // lowpass whose coefficient ramps from 0 (untouched) toward `darken`.
+      let smoothed = 0;
       for (let i = 0; i < length; i++) {
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+        const t = i / length;
+        const envelope = Math.pow(1 - t, space.decay);
+        const noise = (Math.random() * 2 - 1) * envelope;
+        const smoothing = t * space.darken;
+        smoothed = smoothed * smoothing + noise * (1 - smoothing);
+        data[i] = smoothed;
+      }
+
+      // sparse discrete early reflections layered on top, each a little
+      // quieter and a little later than the last, with light jitter so
+      // left/right ears don't get identical timing.
+      for (let r = 0; r < space.erCount; r++) {
+        const frac = (r + 1) / (space.erCount + 1);
+        const jitter = (Math.random() - 0.5) * (0.4 / space.erCount);
+        const posSec = Math.max(0, Math.min(space.seconds, (frac + jitter) * (space.erSpanMs / 1000)));
+        const idx = Math.min(length - 1, Math.floor(posSec * rate));
+        const amp = Math.pow(space.erDecay, r) * (0.6 + Math.random() * 0.4);
+        data[idx] += amp * (Math.random() < 0.5 ? -1 : 1);
       }
     }
     return impulse;
@@ -210,7 +261,7 @@
 
     convolver = audioCtx.createConvolver();
     convolver.normalize = true;
-    convolver.buffer = buildImpulseResponse(audioCtx, 1.4, 2.8);
+    convolver.buffer = buildImpulseResponse(audioCtx, state.reverbSpace);
 
     dryGain = audioCtx.createGain();
     wetGain = audioCtx.createGain();
@@ -265,6 +316,62 @@
     dryGain.gain.value = 0.92; // small constant headroom so wet doesn't clip; independent of reverb amount
   }
 
+  // ---------- Crossfade (§4.19) ----------
+  // Deliberately NOT a true overlapping crossfade (that needs a second
+  // <video>/source-node pair playing in parallel, which means duplicating a
+  // good chunk of the playback engine and its state handling). This is the
+  // safer version: fade masterGain out as the current track nears its end,
+  // then — only once playback has actually moved on to the next track — fade
+  // it back in. Same audible "no hard cut" result for the common case
+  // (reaching the end of a track during normal playback), without ever
+  // having two tracks' audio in the graph at once.
+  const CROSSFADE_SECONDS = 3;
+  let crossfadeState = 'idle'; // 'idle' | 'fading-out' | 'fading-in'
+  let crossfadeHandoff = false; // one-shot: true only for the loadTrack() call that continues a fade-out into a fade-in
+  // Distinguishes "the user pressed pause" from a `pause` event fired as
+  // part of a track reaching its natural end (which also fires `pause`,
+  // right before `ended` — empirically NOT reliably after mediaEl.ended
+  // becomes true in this Chromium build, so that flag can't be used to tell
+  // the two apart). Only togglePlay()'s explicit user-facing pause sets this.
+  let userInitiatedPause = false;
+
+  function cancelCrossfade() {
+    if (crossfadeState === 'idle') return;
+    if (audioCtx && masterGain) {
+      masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
+      masterGain.gain.setValueAtTime(1, audioCtx.currentTime);
+    }
+    crossfadeState = 'idle';
+  }
+
+  // Checked every timeupdate tick; only actually does anything in the last
+  // CROSSFADE_SECONDS of a track, and only once per track (crossfadeState
+  // guards re-entry).
+  function maybeStartCrossfadeOut() {
+    if (!state.crossfadeEnabled || crossfadeState !== 'idle') return;
+    if (!audioCtx || !masterGain || !mediaEl.duration) return;
+    if (state.repeatMode === 'one') return; // looping the same track — fading into itself would just be a dip mid-loop
+    const remaining = mediaEl.duration - mediaEl.currentTime;
+    if (remaining > CROSSFADE_SECONDS || remaining <= 0) return;
+    if (pickNextIndex(true) === -1) return; // nothing to advance to — let it end at full volume rather than fade into silence
+
+    crossfadeState = 'fading-out';
+    const now = audioCtx.currentTime;
+    masterGain.gain.cancelScheduledValues(now);
+    masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+    masterGain.gain.linearRampToValueAtTime(0, now + Math.max(0.05, remaining));
+  }
+
+  function startCrossfadeIn() {
+    if (!audioCtx || !masterGain) return;
+    crossfadeState = 'fading-in';
+    const now = audioCtx.currentTime;
+    masterGain.gain.cancelScheduledValues(now);
+    masterGain.gain.setValueAtTime(0, now);
+    masterGain.gain.linearRampToValueAtTime(1, now + CROSSFADE_SECONDS);
+    setTimeout(() => { if (crossfadeState === 'fading-in') crossfadeState = 'idle'; }, CROSSFADE_SECONDS * 1000 + 50);
+  }
+
   // Sets one EQ band's slider + label + the actual filter gain. Shared by direct
   // slider drags, presets, saved-settings restore, and overlay remote commands
   // so all four stay in sync instead of duplicating the same four lines each.
@@ -284,6 +391,22 @@
     valReverb.textContent = value + ' %';
     applyEqValues();
   }
+
+  // Rebuilds the convolver's impulse response for a different space — cheap
+  // (a couple ms to synthesize even the 3.2s cathedral tail) so this can just
+  // run live on click rather than needing a restart.
+  function setReverbSpace(key) {
+    if (!REVERB_SPACES[key]) return;
+    state.reverbSpace = key;
+    if (audioCtx && convolver) convolver.buffer = buildImpulseResponse(audioCtx, key);
+    spacePickerEl.querySelectorAll('.space-btn').forEach((btn) => {
+      btn.classList.toggle('on', btn.dataset.space === key);
+    });
+    scheduleSave();
+  }
+  spacePickerEl.querySelectorAll('.space-btn').forEach((btn) => {
+    btn.addEventListener('click', () => setReverbSpace(btn.dataset.space));
+  });
 
   // ---------- EQ presets ----------
   // Band order: 60, 150, 400, 1K, 2.5K, 6K, 12K, 16K
@@ -1237,6 +1360,14 @@
 
   function loadTrack(index, autoplay) {
     if (index < 0 || index >= state.tracks.length) return;
+    // Any crossfade fade-out in progress belongs to *this* transition only
+    // when playNext() explicitly set crossfadeHandoff right before calling
+    // us (see startCrossfadeIn() below) — a manual track change (playlist
+    // click, prev/next buttons, shuffle) mid-fade should snap volume back
+    // to normal rather than leave the new track ducked.
+    if (crossfadeState !== 'idle' && !crossfadeHandoff) cancelCrossfade();
+    crossfadeHandoff = false;
+
     state.currentIndex = index;
     const track = state.tracks[index];
     state.currentPath = track.path;
@@ -1276,6 +1407,7 @@
     if (mediaEl.paused) {
       mediaEl.play().catch(() => {});
     } else {
+      userInitiatedPause = true;
       mediaEl.pause();
     }
   }
@@ -1311,15 +1443,23 @@
     if (next === -1) {
       mediaEl.pause();
       setPlayIcon(false);
+      cancelCrossfade();
       return;
     }
+    // If we're mid fade-out, this specific loadTrack() call is the natural
+    // continuation of it — tell it not to snap volume back, then pick up
+    // with a fade-in once the new track is loaded.
+    const continuingCrossfade = crossfadeState === 'fading-out';
+    crossfadeHandoff = continuingCrossfade;
     loadTrack(next, true);
+    if (continuingCrossfade) startCrossfadeIn();
   }
 
   function playPrev() {
     if (state.tracks.length === 0) return;
     if (mediaEl.currentTime > 3) {
       mediaEl.currentTime = 0;
+      cancelCrossfade(); // restarting the same track shouldn't inherit a fade-out scheduled for its old position
       return;
     }
     const prev = pickNextIndex(false);
@@ -1442,6 +1582,8 @@
       introEnabled: state.introEnabled,
       autoUpdateCheck: state.autoUpdateCheck,
       overlayMode: state.overlayMode,
+      reverbSpace: state.reverbSpace,
+      crossfadeEnabled: state.crossfadeEnabled,
       volume: mediaEl.volume,
       eq: {
         bands: eqSliderEls.map((s) => Number(s.value)),
@@ -1497,6 +1639,9 @@
       state.autoUpdateCheck = data.autoUpdateCheck !== false;
       setToggleUI(toggleAutoUpdate, state.autoUpdateCheck);
       setOverlayMode(data.overlayMode === 'bar' ? 'bar' : 'floating');
+      setReverbSpace(typeof data.reverbSpace === 'string' && REVERB_SPACES[data.reverbSpace] ? data.reverbSpace : DEFAULT_REVERB_SPACE);
+      state.crossfadeEnabled = data.crossfadeEnabled === true;
+      setToggleUI(toggleCrossfade, state.crossfadeEnabled);
       if (data.repeatMode) {
         state.repeatMode = data.repeatMode;
         updateRepeatButton();
@@ -1634,6 +1779,13 @@
   });
   toggleWave.addEventListener('click', () => { userToggledWaveform = true; setWaveformEnabled(!state.waveformEnabled); });
 
+  toggleCrossfade.addEventListener('click', () => {
+    state.crossfadeEnabled = !state.crossfadeEnabled;
+    setToggleUI(toggleCrossfade, state.crossfadeEnabled);
+    if (!state.crossfadeEnabled) cancelCrossfade();
+    scheduleSave();
+  });
+
   // Which window createOverlayWindow() builds next time — read directly by
   // main.js out of the settings file, same pattern as trayOnClose/introEnabled.
   // Only takes effect on the next open, not on an already-open overlay.
@@ -1701,7 +1853,18 @@
   btnWaveToggle.addEventListener('click', () => { userToggledWaveform = true; setWaveformEnabled(!state.waveformEnabled); });
 
   mediaEl.addEventListener('play', () => { setPlayIcon(true); broadcastState(); startRippleLoop(); });
-  mediaEl.addEventListener('pause', () => { setPlayIcon(false); broadcastState(); stopRippleLoop(); });
+  mediaEl.addEventListener('pause', () => {
+    setPlayIcon(false);
+    broadcastState();
+    stopRippleLoop();
+    // Web Audio's gain ramp runs on the AudioContext clock, not mediaEl's —
+    // it keeps ticking down while paused, so resuming later could come back
+    // silent (already ramped to 0) if left alone. Only a *user-initiated*
+    // pause cancels it — reaching the end also fires `pause` (just before
+    // `ended`), and that case must NOT cancel a fade-in that's already
+    // under way for the next track.
+    if (userInitiatedPause) { cancelCrossfade(); userInitiatedPause = false; }
+  });
   mediaEl.addEventListener('ended', () => playNext(true));
 
   mediaEl.addEventListener('loadedmetadata', () => {
@@ -1723,6 +1886,7 @@
       updateRangeFill(seekBar);
     }
     updateActiveLyricsLine();
+    maybeStartCrossfadeOut();
     const now = Date.now();
     if (now - lastOverlayBroadcast > 500) {
       lastOverlayBroadcast = now;
@@ -1735,6 +1899,7 @@
     updateRangeFill(seekBar);
   });
   seekBar.addEventListener('change', () => {
+    cancelCrossfade(); // seeking away from the tail end mid-fade shouldn't leave volume ducked
     if (mediaEl.duration) {
       mediaEl.currentTime = (Number(seekBar.value) / 1000) * mediaEl.duration;
     }

@@ -714,6 +714,28 @@ input[type="range"]::-webkit-slider-runnable-track {
 }
 .eq-slider input { width: 100%; }
 
+/* Which synthesized impulse response the convolver uses (§4.19) — separate
+   from the EQ presets above: this is the reverb's *character* (room size),
+   the reverb-slider is its *amount* (wet %). */
+.space-picker {
+  display: flex;
+  gap: 6px;
+  margin-top: var(--space-3);
+}
+.space-btn {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 5px 4px;
+  font-family: var(--font-heading);
+  font-size: 11px;
+  cursor: pointer;
+}
+.space-btn:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.space-btn.on { border-color: var(--color-accent); color: var(--color-accent-300); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+
 .preset-btn {
   background: transparent;
   border: 1px solid var(--color-divider);

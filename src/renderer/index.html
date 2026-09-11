@@ -128,6 +128,12 @@
           <div class="eq-slider reverb-slider">
             <label>Reverb<span id="valReverb">0 %</span></label>
             <input type="range" id="reverbSlider" min="0" max="100" step="1" value="0" />
+            <div class="space-picker" id="spacePicker">
+              <button class="space-btn" data-space="room">Room</button>
+              <button class="space-btn on" data-space="hall">Hall</button>
+              <button class="space-btn" data-space="plate">Plate</button>
+              <button class="space-btn" data-space="cathedral">Cathedral</button>
+            </div>
           </div>
           <p class="eq-note">현재 프리셋: <span id="presetLabel">사용자 설정</span> · ±36dB · 리미터가 항상 뒤에서 클리핑을 막아 리버브를 올려도 원음 볼륨은 그대로 유지됩니다.</p>
         </section>
@@ -173,6 +179,13 @@
               <div class="setting-desc">앱을 실행할 때 새 버전이 있는지 조용히 확인합니다.</div>
             </div>
             <button id="toggleAutoUpdate" class="toggle-switch on"><span class="knob"></span></button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-label">자동 크로스페이드</div>
+              <div class="setting-desc">다음 곡으로 자연스럽게 넘어갈 때(재생목록 끝까지 자동 재생) 곡이 끝나기 몇 초 전부터 볼륨을 서서히 낮췄다가, 다음 곡에서 다시 서서히 올립니다.</div>
+            </div>
+            <button id="toggleCrossfade" class="toggle-switch"><span class="knob"></span></button>
           </div>
           <div class="setting-row">
             <div class="setting-text">
