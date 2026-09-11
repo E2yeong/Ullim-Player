@@ -27,10 +27,10 @@
   --font-heading: "Inter", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
   --font-body: "Inter", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
 
-  --space-2: 6px;
-  --space-3: 8px;
-  --space-4: 11px;
-  --space-6: 17px;
+  --space-2: 7px;
+  --space-3: 9px;
+  --space-4: 12px;
+  --space-6: 19px;
 
   --radius-sm: 4px;
   --radius-md: 8px;
@@ -46,16 +46,16 @@ html, body {
   font-family: var(--font-body);
   background: var(--color-bg);
   color: var(--color-text);
-  font-size: 14px;
+  font-size: 15px;
   user-select: none;
 }
 h6 {
   font-family: var(--font-heading);
   font-weight: 500;
-  font-size: 12px;
+  font-size: 12.5px;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
   margin: 0;
 }
 
@@ -89,7 +89,7 @@ h6 {
   background: transparent;
   border: none;
   border-radius: var(--radius-md);
-  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
   cursor: pointer;
 }
 .rail-btn:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); color: var(--color-text); }
@@ -125,7 +125,7 @@ h6 {
   background: color-mix(in srgb, var(--color-bg) 55%, transparent);
 }
 .search-row:focus-within { border-color: var(--color-accent); }
-.search-row svg { width: 14px; height: 14px; flex: none; color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+.search-row svg { width: 14px; height: 14px; flex: none; color: color-mix(in srgb, var(--color-text) 58%, transparent); }
 .search-row input {
   flex: 1;
   min-width: 0;
@@ -134,14 +134,14 @@ h6 {
   outline: none;
   color: var(--color-text);
   font-family: var(--font-body);
-  font-size: 12.5px;
+  font-size: 13px;
 }
-.search-row input::placeholder { color: color-mix(in srgb, var(--color-text) 38%, transparent); }
+.search-row input::placeholder { color: color-mix(in srgb, var(--color-text) 50%, transparent); }
 .search-clear {
   flex: none;
   background: transparent;
   border: none;
-  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
   font-size: 12px;
   line-height: 1;
   padding: 2px 3px;
@@ -174,9 +174,9 @@ h6 {
   border-radius: var(--radius-md);
   border: 1px solid var(--color-divider);
   background: transparent;
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
   font-family: var(--font-heading);
-  font-size: 11.5px;
+  font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -188,7 +188,7 @@ h6 {
   opacity: 0;
   font-size: 13px;
   line-height: 1;
-  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 .pl-tab:hover .pl-tab-del { opacity: 1; }
 .pl-tab .pl-tab-del:hover { color: #ff8a9a; }
@@ -202,7 +202,7 @@ h6 {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-heading);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 /* Small "add this track to a playlist" popup menu (rendered on <body>) */
@@ -224,8 +224,8 @@ h6 {
   text-align: left;
   background: transparent;
   border: none;
-  color: color-mix(in srgb, var(--color-text) 85%, transparent);
-  font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 88%, transparent);
+  font-size: 13px;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -248,28 +248,37 @@ h6 {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 11px 10px;
+  padding: 12px 11px;
   border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 13.5px;
-  color: color-mix(in srgb, var(--color-text) 80%, transparent);
-  margin-bottom: 2px;
+  font-size: 14.5px;
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+  margin-bottom: 3px;
 }
 .playlist li:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
-.playlist li.active { background: var(--color-accent-900); color: var(--color-text); }
+/* Now-playing row: a filled accent bar (not just a dark tint) plus bolder
+   type so the currently playing track reads at a glance, not just on
+   close inspection. */
+.playlist li.active {
+  background: color-mix(in srgb, var(--color-accent) 24%, var(--color-surface));
+  color: var(--color-text);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
 .playlist li .idx {
   width: 18px;
   flex: none;
   text-align: center;
   color: var(--color-accent-300);
-  font-size: 11px;
+  font-size: 11.5px;
 }
+.playlist li.active .idx { color: var(--color-accent-200); }
 .playlist li .track-text {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 .playlist li .name {
   min-width: 0;
@@ -282,19 +291,21 @@ h6 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
-  color: color-mix(in srgb, var(--color-text) 42%, transparent);
+  font-size: 12px;
+  font-weight: 400;
+  color: color-mix(in srgb, var(--color-text) 56%, transparent);
 }
-.playlist li.active .artist { color: color-mix(in srgb, var(--color-text) 60%, transparent); }
+.playlist li.active .artist { color: color-mix(in srgb, var(--color-text) 74%, transparent); }
 .playlist li .dur {
   flex: none;
-  font-size: 11px;
-  color: color-mix(in srgb, var(--color-text) 42%, transparent);
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 56%, transparent);
 }
+.playlist li.active .dur { color: color-mix(in srgb, var(--color-text) 74%, transparent); }
 .playlist li .row-btn {
   flex: none;
   opacity: 0;
-  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
   font-size: 15px;
   line-height: 1;
   padding: 3px 5px;
@@ -312,9 +323,9 @@ h6 {
   padding: 12px;
   border: 1px dashed var(--color-neutral-800);
   border-radius: var(--radius-md);
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: color-mix(in srgb, var(--color-text) 42%, transparent);
+  font-size: 12px;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--color-text) 56%, transparent);
   text-align: center;
   flex: none;
 }
@@ -324,7 +335,7 @@ h6 {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   cursor: pointer; text-decoration: none;
   font-family: var(--font-heading); font-weight: 500;
-  font-size: 13px; line-height: 1.2; color: var(--color-text);
+  font-size: 13.5px; line-height: 1.2; color: var(--color-text);
   background: transparent; border: 1px solid transparent;
   padding: 8px 13px;
   border-radius: var(--radius-md);
@@ -336,7 +347,7 @@ h6 {
 .btn-primary:hover { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
 .btn-primary.filled { background: var(--color-accent); color: #14141c; }
 .btn-primary.filled:hover { background: var(--color-accent-300); }
-.btn-secondary { border-color: var(--color-divider); color: color-mix(in srgb, var(--color-text) 75%, transparent); }
+.btn-secondary { border-color: var(--color-divider); color: color-mix(in srgb, var(--color-text) 80%, transparent); }
 .btn-secondary:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); color: var(--color-text); }
 .btn-ghost { color: var(--color-accent); border-color: transparent; }
 .btn-ghost:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
@@ -413,7 +424,7 @@ input[type="range"]::-webkit-slider-runnable-track {
   border-radius: 50%;
   border: 1px solid var(--color-divider);
   background: rgba(22, 24, 38, 0.6);
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -421,7 +432,7 @@ input[type="range"]::-webkit-slider-runnable-track {
 }
 .wave-toggle svg { width: 16px; height: 15px; }
 .wave-toggle:hover { border-color: var(--color-accent); color: var(--color-text); }
-.wave-toggle.off { color: color-mix(in srgb, var(--color-text) 28%, transparent); }
+.wave-toggle.off { color: color-mix(in srgb, var(--color-text) 40%, transparent); }
 
 #mediaEl {
   max-width: 100%;
@@ -440,7 +451,7 @@ input[type="range"]::-webkit-slider-runnable-track {
 .cover-note {
   position: relative;
   font-size: 84px;
-  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
   text-shadow: 0 0 26px color-mix(in srgb, var(--color-accent) 55%, transparent);
   transition: opacity 0.4s ease;
 }
@@ -515,7 +526,7 @@ input[type="range"]::-webkit-slider-runnable-track {
   line-height: 1.5;
   text-align: center;
   max-width: 100%;
-  color: color-mix(in srgb, var(--color-text) 38%, transparent);
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
   transition: color 0.25s ease, font-size 0.25s ease;
 }
 .lyrics-line.active {
@@ -532,20 +543,20 @@ input[type="range"]::-webkit-slider-runnable-track {
   text-align: center;
   font-size: 14px;
   line-height: 1.9;
-  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+  color: color-mix(in srgb, var(--color-text) 82%, transparent);
 }
 
 .lyrics-empty {
   margin: auto;
   font-size: 13px;
-  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
   text-align: center;
 }
 
 .now-playing { text-align: center; margin-bottom: var(--space-3); flex: none; }
 .track-title {
   font-family: var(--font-heading);
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 500;
   letter-spacing: -0.01em;
   overflow: hidden;
@@ -553,9 +564,9 @@ input[type="range"]::-webkit-slider-runnable-track {
   white-space: nowrap;
 }
 .track-sub {
-  font-size: 12px;
-  color: color-mix(in srgb, var(--color-text) 45%, transparent);
-  margin-top: 3px;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  margin-top: 4px;
 }
 
 .seek-row {
@@ -566,8 +577,8 @@ input[type="range"]::-webkit-slider-runnable-track {
   flex: none;
 }
 .time {
-  font-size: 11.5px;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
   width: 38px;
   text-align: center;
   flex-shrink: 0;
@@ -620,7 +631,7 @@ input[type="range"]::-webkit-slider-runnable-track {
   align-items: center;
   gap: var(--space-2);
   width: 140px;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
 }
 .volume-box svg { width: 15px; height: 15px; flex: none; }
 .volume-box input { width: 100px; }
@@ -658,8 +669,8 @@ input[type="range"]::-webkit-slider-runnable-track {
   flex: 1;
   min-width: 0;
 }
-.eq-band .eq-val { font-size: 10px; color: var(--color-accent-300); white-space: nowrap; }
-.eq-band .eq-freq { font-size: 10px; color: color-mix(in srgb, var(--color-text) 42%, transparent); }
+.eq-band .eq-val { font-size: 10.5px; color: var(--color-accent-300); white-space: nowrap; }
+.eq-band .eq-freq { font-size: 10.5px; color: color-mix(in srgb, var(--color-text) 56%, transparent); }
 
 /* Vertical EQ slider: a REAL, fully native <input type="range"> — same
    circular thumb + --fill gradient as every other slider in the app (the
@@ -693,8 +704,8 @@ input[type="range"]::-webkit-slider-runnable-track {
 .eq-slider label {
   display: flex;
   justify-content: space-between;
-  font-size: 11.5px;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
   margin-bottom: var(--space-2);
 }
 .eq-slider input { width: 100%; }
@@ -702,11 +713,11 @@ input[type="range"]::-webkit-slider-runnable-track {
 .preset-btn {
   background: transparent;
   border: 1px solid var(--color-divider);
-  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
   border-radius: var(--radius-md);
   padding: 5px 11px;
   font-family: var(--font-heading);
-  font-size: 11.5px;
+  font-size: 12px;
   cursor: pointer;
 }
 .preset-btn:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
@@ -714,9 +725,9 @@ input[type="range"]::-webkit-slider-runnable-track {
 
 .eq-note {
   flex: none;
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: color-mix(in srgb, var(--color-text) 42%, transparent);
+  font-size: 12px;
+  line-height: 1.65;
+  color: color-mix(in srgb, var(--color-text) 56%, transparent);
   margin: var(--space-4) 2px 0;
 }
 .eq-note #presetLabel { color: var(--color-accent-300); }
@@ -734,8 +745,8 @@ input[type="range"]::-webkit-slider-runnable-track {
   border-bottom: 1px solid var(--color-divider);
 }
 .setting-text { flex: 1; }
-.setting-label { font-size: 13.5px; }
-.setting-desc { font-size: 11.5px; line-height: 1.5; color: color-mix(in srgb, var(--color-text) 45%, transparent); margin-top: 3px; }
+.setting-label { font-size: 14.5px; }
+.setting-desc { font-size: 12.5px; line-height: 1.6; color: color-mix(in srgb, var(--color-text) 58%, transparent); margin-top: 4px; }
 
 .toggle-switch {
   flex: none;
@@ -767,12 +778,12 @@ input[type="range"]::-webkit-slider-runnable-track {
   gap: var(--space-4);
   margin-top: var(--space-6);
 }
-.app-version { font-size: 12px; color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+.app-version { font-size: 12.5px; color: color-mix(in srgb, var(--color-text) 58%, transparent); }
 .update-status {
   flex: none;
   margin-top: var(--space-2);
-  font-size: 11.5px;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
   min-height: 14px;
 }
 .update-status.error { color: #ff6b81; }
