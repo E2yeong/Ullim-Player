@@ -23,6 +23,8 @@
 - **electron-updater** — GitHub Releases(비공개 저장소)를 피드로 사용하는 자동 업데이트
 - **music-metadata** (`music-metadata@7`, CommonJS 마지막 버전) — 메인 프로세스에서 ID3/MP4/Vorbis
   태그·앨범아트 읽기 (§4.14). v8+는 순수 ESM이라 `require()`가 안 되므로 7.x에 고정
+- **node-id3** — ID3v2 태그 쓰기 (§4.20, mp3 전용). `music-metadata`는 읽기 전용이라 편집 기능엔
+  별도 패키지가 필요했음
 - **GitHub CLI(`gh`)** — 저장소 생성, 릴리스 업로드/공개에 사용 (사람이 미리 `gh auth login` 해둬야 함)
 
 ## 3. 폴더 구조
@@ -520,6 +522,23 @@ UI 목업(Claude Design 캔버스, `Ullim app UI mockups/` 폴더 — 특히 `_d
   텍스트 태그도 없으면 같이 채움), 후자는 재생목록 배경 채우기용(`wantPicture: false`, 빠름).
   둘 다 `applyMeta()`로 수렴하고 `artLoadToken`으로 느린 아트 응답이 새 트랙을 덮지 않게 한다.
 
+### 4.20 ID3 태그 편집기
+
+- **범위 — mp3만**: `music-metadata`(§4.14)는 읽기 전용이라 쓰기는 별도 패키지 `node-id3`를 붙였는데,
+  이 라이브러리가 다루는 건 딱 ID3v2 — mp3의 태그 포맷이다. mp4(atom)·flac/ogg(Vorbis comment)는
+  포맷 자체가 달라서 손대지 않음 — main.js의 `write-metadata` 핸들러가 확장자로 걸러서
+  `.mp3`가 아니면 바로 에러를 돌려준다.
+- **UI**: 재생목록 각 행의 ✎ 버튼(라이브러리·재생목록 양쪽 뷰 모두 — 태그 편집은 어느 재생목록에서
+  보고 있는지와 무관한 라이브러리 전역 작업이라서) → `#editTagsModal` 모달(제목/아티스트/앨범/연도).
+  mp3가 아닌 트랙도 모달 자체는 열리지만 입력칸+저장 버튼이 비활성화되고 "mp3만 가능" 안내가
+  뜬다 — 버튼을 아예 숨기는 대신, 왜 안 되는지 보이게.
+- **저장**: `NodeID3.update()`(전체 태그를 갈아엎는 `write()`가 아니라 병합 — 앨범아트·트랙번호 등
+  건드리지 않은 필드는 그대로 유지). main.js가 지연 `require('node-id3')`로 로드(다른 선택적
+  기능들과 같은 패턴 — 로드 실패가 앱 전체를 막지 않게).
+- **저장 후**: `track.meta = null`로 캐시를 비우고 `loadMetaForTrack()`을 다시 호출해 실제 파일을
+  재파싱 — 화면에 즉시 반영되는 값이 "방금 입력한 값을 그대로 보여주는 것"이 아니라 "디스크에 실제로
+  쓰인 값을 다시 읽어온 것"임을 보장(쓰기가 조용히 실패해도 화면과 실제 파일이 어긋나지 않음).
+
 ## 5. 프로세스 간 통신(IPC) 채널 요약
 
 | 채널 | 방향 | 용도 |
@@ -539,6 +558,7 @@ UI 목업(Claude Design 캔버스, `Ullim app UI mockups/` 폴더 — 특히 `_d
 | `splash-done` | splash→main | 인트로 영상 종료/건너뛰기 → 스플래시 창 닫고 메인 창 표시 |
 | `fetch-lyrics` | renderer→main (invoke) | 로컬 `.lrc` → 캐시 → LRCLIB 순으로 가사 조회 (§4.13) |
 | `read-metadata` | renderer→main (invoke) | ID3/MP4/Vorbis 태그 + (선택) 축소된 앨범아트 읽기 (§4.14) |
+| `write-metadata` | renderer→main (invoke) | ID3v2 태그 쓰기, mp3 전용 (§4.20) |
 
 ## 6. 배포 절차 (재현용 명령어)
 
@@ -615,7 +635,7 @@ npx electron-builder --prepackaged "dist\win-unpacked" --win nsis
 ④ UI/UX 시인성 → ⑤ 다이나믹 컬러 테마 → ⑥ 오버레이·작업표시줄 모드 전환 → ⑦ 오디오 엔진(IR 리버브
 + 크로스페이드)** — **전부 완료.** 다음은 릴리스(v1.0.9 예정, 아직 미실행) 아니면 아래 항목들 중 선택.
 
-- ~~ID3 태그 읽기~~ — 완료 (§4.14). ID3 태그 **편집기**는 이번 범위에서 빠짐(읽기만).
+- ~~ID3 태그 읽기~~ — 완료 (§4.14). ~~ID3 태그 편집기~~ — 완료 (§4.20, mp3 전용, 2026-09-10 이후 추가 작업).
 - ~~멀티 재생목록~~ — 완료 (§4.15).
 - ~~실시간 곡 검색~~ — 완료 (§4.16).
 - ~~UI/UX 시인성~~ — 완료 (현재 곡 강조/보조 텍스트 대비/폰트·간격, §4.1 참고).

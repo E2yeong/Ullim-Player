@@ -783,6 +783,44 @@ ipcMain.handle('read-metadata', async (_event, payload) => {
   }
 });
 
+// ---------- IPC: track metadata editing (write-back) ----------
+// mp3-only: node-id3 reads/writes ID3v2, which is the mp3 tag format — mp4
+// (atoms) and flac/ogg (Vorbis comments) use entirely different tag formats
+// that this library doesn't touch, so editing those isn't offered.
+let _id3 = null;
+function getNodeID3() {
+  if (!_id3) _id3 = require('node-id3');
+  return _id3;
+}
+
+ipcMain.handle('write-metadata', async (_event, payload) => {
+  const { path: trackPath, tags } = payload || {};
+  if (!trackPath || !tags) return { error: '잘못된 요청' };
+  if (path.extname(trackPath).toLowerCase() !== '.mp3') {
+    return { error: 'mp3 파일만 태그 편집을 지원합니다' };
+  }
+  try {
+    const NodeID3 = getNodeID3();
+    const id3Tags = {};
+    // Empty string clears a field for node-id3's update(); only send fields
+    // the editor actually has (year stays a plain 4-digit string, not a number).
+    if (typeof tags.title === 'string') id3Tags.title = tags.title;
+    if (typeof tags.artist === 'string') id3Tags.artist = tags.artist;
+    if (typeof tags.album === 'string') id3Tags.album = tags.album;
+    if (typeof tags.year === 'string') id3Tags.year = tags.year;
+
+    // update() merges into the existing tag (album art, track number, etc.
+    // stay untouched) instead of write()'s full replace.
+    const result = NodeID3.update(id3Tags, trackPath);
+    if (result !== true) {
+      return { error: (result && result.message) || '태그 저장에 실패했습니다' };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { error: err && err.message ? err.message : '태그 저장 중 오류가 발생했습니다' };
+  }
+});
+
 // ---------- IPC: splash window ----------
 ipcMain.handle('get-intro-video-url', () => {
   const p = getIntroVideoPath();

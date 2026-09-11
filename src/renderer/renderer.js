@@ -942,6 +942,82 @@
     applyThemeColor(null); // no art showing -> back to the static palette
   }
 
+  // ---------- ID3 tag editor (§4.20) ----------
+  // mp3-only (see main.js's write-metadata handler — node-id3 only speaks
+  // ID3v2, which is specifically the mp3 tag format). Other formats show the
+  // same modal read-only-ish (fields disabled, Save unavailable) rather than
+  // hiding the ✎ button entirely, so it's still obvious *why* nothing happens.
+  const editTagsModal = document.getElementById('editTagsModal');
+  const editTitleInput = document.getElementById('editTitle');
+  const editArtistInput = document.getElementById('editArtist');
+  const editAlbumInput = document.getElementById('editAlbum');
+  const editYearInput = document.getElementById('editYear');
+  const editModalNote = document.getElementById('editModalNote');
+  const editCancelBtn = document.getElementById('editCancel');
+  const editSaveBtn = document.getElementById('editSave');
+  let editingTrack = null;
+
+  function openEditTagsModal(track) {
+    editingTrack = track;
+    editTitleInput.value = (track.meta && track.meta.title) || '';
+    editArtistInput.value = (track.meta && track.meta.artist) || '';
+    editAlbumInput.value = (track.meta && track.meta.album) || '';
+    editYearInput.value = track.meta && track.meta.year ? String(track.meta.year) : '';
+
+    const isMp3 = extOf(track.name) === 'mp3';
+    editModalNote.textContent = isMp3
+      ? 'mp3 파일의 ID3 태그만 수정할 수 있어요.'
+      : '이 파일 형식은 태그 수정을 지원하지 않아요 (mp3만 가능).';
+    editModalNote.classList.toggle('error', !isMp3);
+    [editTitleInput, editArtistInput, editAlbumInput, editYearInput, editSaveBtn].forEach((el) => { el.disabled = !isMp3; });
+
+    editTagsModal.hidden = false;
+    if (isMp3) editTitleInput.focus();
+  }
+
+  function closeEditTagsModal() {
+    editTagsModal.hidden = true;
+    editingTrack = null;
+  }
+
+  editCancelBtn.addEventListener('click', closeEditTagsModal);
+  editTagsModal.addEventListener('click', (e) => { if (e.target === editTagsModal) closeEditTagsModal(); });
+  editTagsModal.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeEditTagsModal();
+    else if (e.key === 'Enter' && !editSaveBtn.disabled) editSaveBtn.click();
+  });
+
+  editSaveBtn.addEventListener('click', async () => {
+    if (!editingTrack) return;
+    const track = editingTrack;
+    const tags = {
+      title: editTitleInput.value.trim(),
+      artist: editArtistInput.value.trim(),
+      album: editAlbumInput.value.trim(),
+      year: editYearInput.value.trim()
+    };
+    editSaveBtn.disabled = true;
+    editSaveBtn.textContent = '저장 중...';
+    let result;
+    try {
+      result = await window.api.writeMetadata({ path: track.path, tags });
+    } catch (e) {
+      result = { error: e && e.message };
+    }
+    editSaveBtn.disabled = false;
+    editSaveBtn.textContent = '저장';
+
+    if (!result || result.error) {
+      editModalNote.textContent = (result && result.error) || '태그 저장에 실패했습니다';
+      editModalNote.classList.add('error');
+      return;
+    }
+
+    closeEditTagsModal();
+    track.meta = null; // drop the stale cached tags so loadMetaForTrack actually re-reads the file
+    await loadMetaForTrack(track); // re-renders the playlist row + now-playing (via applyMeta) with the new tags
+  });
+
   // ---------- Library / playlists ----------
   const LIBRARY_ID = 'library';
 
@@ -1200,9 +1276,21 @@
       dur.className = 'dur';
       dur.textContent = track.durationSec ? fmtTime(track.durationSec) : '';
 
+      // Tag editing is a library-wide operation (not tied to which playlist
+      // you're browsing from), so this button shows in both views.
+      const edit = document.createElement('span');
+      edit.className = 'row-btn edit';
+      edit.textContent = '✎';
+      edit.title = '태그 편집';
+      edit.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openEditTagsModal(track);
+      });
+
       // library view: "＋" to file into a playlist; playlist view: no add button
+      let add = null;
       if (!pl) {
-        const add = document.createElement('span');
+        add = document.createElement('span');
         add.className = 'row-btn add';
         add.textContent = '＋';
         add.title = '재생목록에 추가';
@@ -1210,7 +1298,6 @@
           e.stopPropagation();
           openAddToPlaylistMenu(add, li, track.path);
         });
-        li.appendChild(add);
       }
 
       const remove = document.createElement('span');
@@ -1225,6 +1312,8 @@
       li.appendChild(idx);
       li.appendChild(text);
       li.appendChild(dur);
+      li.appendChild(edit);
+      if (add) li.appendChild(add);
       li.appendChild(remove);
       li.addEventListener('click', () => loadTrack(i, true));
 

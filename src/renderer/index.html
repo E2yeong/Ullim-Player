@@ -207,6 +207,33 @@
     </section>
 
   </div>
+
+  <div class="modal-overlay" id="editTagsModal" hidden>
+    <div class="modal">
+      <h6>태그 편집</h6>
+      <div class="modal-field">
+        <label for="editTitle">제목</label>
+        <input type="text" id="editTitle" autocomplete="off" />
+      </div>
+      <div class="modal-field">
+        <label for="editArtist">아티스트</label>
+        <input type="text" id="editArtist" autocomplete="off" />
+      </div>
+      <div class="modal-field">
+        <label for="editAlbum">앨범</label>
+        <input type="text" id="editAlbum" autocomplete="off" />
+      </div>
+      <div class="modal-field">
+        <label for="editYear">연도</label>
+        <input type="text" id="editYear" autocomplete="off" inputmode="numeric" placeholder="예: 2024" />
+      </div>
+      <p class="modal-note" id="editModalNote">mp3 파일의 ID3 태그만 수정할 수 있어요.</p>
+      <div class="modal-actions">
+        <button id="editCancel" class="btn btn-secondary">취소</button>
+        <button id="editSave" class="btn btn-primary filled">저장</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="renderer.js"></script>
